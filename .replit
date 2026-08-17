@@ -1,0 +1,10 @@
+run = "npm start"
+entrypoint = "dist-server/server/server.js"
+
+[deployment]
+run = ["sh", "-c", "npm run build && npm start"]
+build = ["sh", "-c", "npm install"]
+
+[[ports]]
+localPort = 3000
+externalPort = 80
