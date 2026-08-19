@@ -41,6 +41,33 @@ export interface GisLayer {
   featureCollection: GeoJsonFeatureCollection;
   createdAt: string;
   updatedAt: string;
+  importId?: string;
+  supersedesLayerId?: string | null;
+}
+
+export interface GisImport {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  layerId: string;
+  supersedesLayerId: string | null;
+  fileName: string;
+  format: 'KML' | 'KMZ' | 'Shapefile ZIP';
+  layerName: string;
+  assetType: string;
+  sourceIdField: string | null;
+  nameField: string | null;
+  featureCount: number;
+  createdCount: number;
+  updatedCount: number;
+  rejectedCount: number;
+  status: 'Published' | 'Rolled back';
+  warnings: string[];
+  importedBy: string;
+  importedAt: string;
+  rolledBackAt?: string;
+  createdAssetIds?: string[];
+  assetSnapshots?: Asset[];
 }
 
 export interface GeofenceResult {
@@ -127,6 +154,8 @@ export interface Asset {
   lastInspected: string;
   geometry: GeoJsonGeometry;
   layerId: string | null;
+  sourceId?: string;
+  sourceImportId?: string;
 }
 
 export interface AttendanceRecord {
@@ -213,6 +242,8 @@ export interface HelpdeskTicket {
   status: 'Open' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed' | 'Reopened';
   createdAt: string;
   dueAt: string;
+  assignedTo?: string | null;
+  messages?: { id:string; by:string; text:string; at:string }[];
 }
 
 export interface Notification {
@@ -263,6 +294,7 @@ export interface StoreData {
   notifications: Notification[];
   activities: Activity[];
   gisLayers: GisLayer[];
+  gisImports: GisImport[];
   syncConflicts: SyncConflict[];
   mediaEvidence: MediaEvidence[];
 }
