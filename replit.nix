@@ -1,3 +1,3 @@
 { pkgs }: {
-  deps = [ pkgs.nodejs_22 ];
+  deps = [ pkgs.nodejs_24 ];
 }
