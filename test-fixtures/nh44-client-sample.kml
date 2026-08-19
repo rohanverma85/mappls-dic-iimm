@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>NH-44 Client Sample</name>
+    <Placemark>
+      <name>NH-44 Km 82–84</name>
+      <ExtendedData>
+        <Data name="asset_id"><value>NH44-82-84</value></Data>
+        <Data name="surface"><value>Bituminous</value></Data>
+        <Data name="lane_count"><value>4</value></Data>
+      </ExtendedData>
+      <LineString><coordinates>79.9341,23.1462 79.9510,23.1580 79.9690,23.1710</coordinates></LineString>
+    </Placemark>
+    <Placemark>
+      <name>NH-44 Safety Marker Km 83</name>
+      <ExtendedData><Data name="asset_id"><value>NH44-M-83</value></Data></ExtendedData>
+      <Point><coordinates>79.9510,23.1580</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>

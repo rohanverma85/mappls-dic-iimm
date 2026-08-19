@@ -104,6 +104,7 @@ export const seedData: StoreData = {
       {type:'Feature',id:'station-road',geometry:{type:'LineString',coordinates:[[77.2028,28.6101],[77.2064,28.6124],[77.2101,28.6145],[77.2143,28.6170],[77.2182,28.6194]]},properties:{name:'Station Road',assetId:'asset-4',surface:'Bituminous'}},
     ]}},
   ],
+  gisImports: [],
   syncConflicts: [],
   mediaEvidence: [],
 };

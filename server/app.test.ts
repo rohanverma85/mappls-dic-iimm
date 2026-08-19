@@ -99,6 +99,28 @@ describe('IIMM API', () => {
     expect(result.body.assets.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
   });
 
+  it('imports versioned GIS features as assets and rolls a replacement back safely', async () => {
+    const authority = await login('usr-auth-1');
+    const base = {projectId:'prj-1',assetType:'Highway Section',layerName:'NH-44 field import',description:'Client review import',fileName:'nh44-section.kml',format:'KML',sourceIdField:'asset_id',nameField:'name',style:{color:'#104685',width:5,opacity:.8},warnings:[]};
+    const first = await request(app).post('/api/gis/imports').set(auth(authority)).send({...base,featureCollection:{type:'FeatureCollection',features:[
+      {type:'Feature',geometry:{type:'LineString',coordinates:[[79.90,23.12],[79.91,23.13]]},properties:{asset_id:'KML-001',name:'Section 001',surface:'Bituminous'}},
+    ]}}).expect(201);
+    expect(first.body.importJob.createdCount).toBe(1);
+    const second = await request(app).post('/api/gis/imports').set(auth(authority)).send({...base,fileName:'nh44-section-v2.kml',replaceLayerId:first.body.layer.id,featureCollection:{type:'FeatureCollection',features:[
+      {type:'Feature',geometry:{type:'LineString',coordinates:[[79.90,23.12],[79.92,23.14]]},properties:{asset_id:'KML-001',name:'Section 001 revised',surface:'Concrete'}},
+      {type:'Feature',geometry:{type:'Point',coordinates:[79.93,23.15]},properties:{asset_id:'KML-002',name:'Section marker 002'}},
+    ]}}).expect(201);
+    expect(second.body.importJob.updatedCount).toBe(1);
+    expect(second.body.importJob.createdCount).toBe(1);
+    expect(second.body.layer.version).toBe(2);
+    const imports = await request(app).get('/api/gis/imports').set(auth(authority)).expect(200);
+    expect(imports.body[0].assetSnapshots).toBeUndefined();
+    await request(app).post(`/api/gis/imports/${second.body.importJob.id}/rollback`).set(auth(authority)).send({}).expect(200);
+    const assets = await request(app).get('/api/assets').set(auth(authority)).expect(200);
+    expect(assets.body.find((asset:{sourceId?:string})=>asset.sourceId==='KML-001').name).toBe('Section 001');
+    expect(assets.body.some((asset:{sourceId?:string})=>asset.sourceId==='KML-002')).toBe(false);
+  });
+
   it('runs citizen validation, field rectification, ATR verification and citizen closure', async () => {
     const citizen = await login('usr-citizen-1');
     const maker = await login('usr-maker-2');

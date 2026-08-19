@@ -74,10 +74,33 @@ const geometrySchema = z.discriminatedUnion('type', [
   z.object({ type:z.literal('MultiPolygon'), coordinates:z.array(z.array(z.array(z.tuple([z.number(),z.number()])).min(4)).min(1)).min(1) }),
 ]);
 
+const coordinatesFor = (geometry: GeoJsonGeometry): [number,number][] => {
+  const points:[number,number][] = [];
+  const visit = (value:unknown) => {
+    if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') points.push([value[0],value[1]]);
+    else if (Array.isArray(value)) value.forEach(visit);
+  };
+  visit(geometry.coordinates);
+  return points;
+};
+
+const geometryCentre = (geometry:GeoJsonGeometry) => {
+  const points = coordinatesFor(geometry);
+  const [lng,lat] = points.reduce(([x,y],[px,py])=>[x+px,y+py],[0,0]);
+  return {lng:lng/points.length,lat:lat/points.length};
+};
+
+const featureSourceId = (feature:{id?:string;geometry:GeoJsonGeometry;properties:Record<string,string|number|boolean|null>}, sourceIdField:string|null) => {
+  const candidate = sourceIdField ? feature.properties[sourceIdField] : feature.properties.asset_id ?? feature.properties.id ?? feature.properties.name ?? feature.id;
+  return candidate === undefined || candidate === null || String(candidate).trim() === ''
+    ? crypto.createHash('sha256').update(JSON.stringify(feature.geometry)).digest('hex').slice(0,20)
+    : String(candidate).trim();
+};
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '12mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'IIMM API', timestamp: new Date().toISOString() }));
 
@@ -289,6 +312,10 @@ export function createApp() {
   });
 
   app.get('/api/gis/layers', auth, async (req, res) => res.json(tenantScope((await store.all()).gisLayers, req.user!)));
+  app.get('/api/gis/imports', auth, async (req, res) => {
+    const imports = tenantScope((await store.all()).gisImports,req.user!).map(({assetSnapshots,createdAssetIds,...item})=>item);
+    res.json(imports);
+  });
   app.get('/api/gis/overview', auth, async (req, res) => {
     const data = await store.all();
     res.json({
@@ -312,6 +339,83 @@ export function createApp() {
     if (!created) return res.status(404).json({ error:'Project not found in the active tenant.' });
     await log(req.user!, 'PUBLISHED_GIS_LAYER', 'GisLayer', created.id, `Published ${created.name} with ${created.featureCollection.features.length} features.`);
     res.status(201).json(created);
+  });
+
+  app.post('/api/gis/imports', auth, allow('authority'), async (req,res) => {
+    const featureSchema = z.object({ type:z.literal('Feature'), id:z.string().optional(), geometry:geometrySchema, properties:z.record(z.union([z.string(),z.number(),z.boolean(),z.null()])).default({}) });
+    const body = z.object({
+      projectId:z.string(), assetType:z.string().min(2), layerName:z.string().min(3), description:z.string().default('Imported infrastructure network'),
+      fileName:z.string().min(3).max(180), format:z.enum(['KML','KMZ','Shapefile ZIP']), sourceIdField:z.string().nullable().default(null), nameField:z.string().nullable().default(null),
+      replaceLayerId:z.string().nullable().default(null), style:z.object({color:z.string().regex(/^#[0-9a-f]{6}$/i),width:z.number().min(1).max(12),opacity:z.number().min(0.1).max(1)}),
+      featureCollection:z.object({type:z.literal('FeatureCollection'),features:z.array(featureSchema).min(1).max(5000)}), warnings:z.array(z.string().max(250)).max(50).default([]),
+    }).parse(req.body);
+    const sourceIds = body.featureCollection.features.map((feature)=>featureSourceId(feature,body.sourceIdField));
+    if (new Set(sourceIds).size !== sourceIds.length) return res.status(400).json({error:'The selected source ID is not unique. Choose another field before publishing.'});
+    const result = await store.mutate((data) => {
+      const tenantId = req.user!.tenantId!;
+      const project = data.projects.find((item)=>item.id===body.projectId&&item.tenantId===tenantId);
+      const tenant = data.tenants.find((item)=>item.id===tenantId);
+      const assetType = tenant?.assetTypes.find((item)=>item.name===body.assetType);
+      const replaced = body.replaceLayerId ? data.gisLayers.find((item)=>item.id===body.replaceLayerId&&item.tenantId===tenantId&&item.projectId===body.projectId&&item.visible) : null;
+      if (!project || !assetType || (body.replaceLayerId && !replaced)) return null;
+      const now = new Date().toISOString();
+      const importId = id('import');
+      const layerId = id('layer');
+      const createdAssetIds:string[] = [];
+      const assetSnapshots:typeof data.assets = [];
+      let createdCount = 0;
+      let updatedCount = 0;
+      const features = body.featureCollection.features.map((feature,index) => {
+        const sourceId = sourceIds[index];
+        const existing = data.assets.find((item)=>item.tenantId===tenantId&&item.projectId===body.projectId&&item.type===body.assetType&&item.sourceId===sourceId);
+        const centre = geometryCentre(feature.geometry as GeoJsonGeometry);
+        const preferredName = body.nameField ? feature.properties[body.nameField] : feature.properties.name;
+        const name = preferredName === undefined || preferredName === null || String(preferredName).trim()==='' ? `${body.assetType} ${sourceId}` : String(preferredName).trim();
+        const attributes = Object.fromEntries(Object.entries(feature.properties).filter(([,value])=>value!==null).slice(0,50).map(([key,value])=>[key,String(value)]));
+        if (existing) {
+          assetSnapshots.push(structuredClone(existing));
+          Object.assign(existing,{name,location:`${centre.lat.toFixed(6)}, ${centre.lng.toFixed(6)}`,attributes,geometry:feature.geometry,layerId,sourceImportId:importId});
+          updatedCount += 1;
+        } else {
+          const asset = {id:id('asset'),tenantId,projectId:body.projectId,type:body.assetType,name,location:`${centre.lat.toFixed(6)}, ${centre.lng.toFixed(6)}`,condition:'Good' as const,attributes,lastInspected:'Not inspected',geometry:feature.geometry as GeoJsonGeometry,layerId,sourceId,sourceImportId:importId};
+          data.assets.unshift(asset);
+          createdAssetIds.push(asset.id);
+          createdCount += 1;
+        }
+        return {...feature,id:feature.id ?? sourceId,properties:{...feature.properties,assetSourceId:sourceId}};
+      });
+      const geometryTypes = new Set(features.map((feature)=>feature.geometry.type.replace('Multi','').replace('String','')));
+      const geometryType = geometryTypes.size>1?'Mixed':geometryTypes.has('Point')?'Point':geometryTypes.has('Line')?'Line':'Polygon';
+      if (replaced) replaced.visible = false;
+      const layer = {id:layerId,tenantId,projectId:body.projectId,name:body.layerName,description:body.description,source:(body.format==='Shapefile ZIP'?'Shapefile':'KML') as 'KML'|'Shapefile',geometryType:geometryType as 'Point'|'Line'|'Polygon'|'Mixed',status:'Published' as const,version:(replaced?.version ?? 0)+1,visible:true,style:body.style,featureCollection:{type:'FeatureCollection' as const,features},createdAt:now,updatedAt:now,importId,supersedesLayerId:replaced?.id ?? null};
+      data.gisLayers.unshift(layer);
+      const importJob = {id:importId,tenantId,projectId:body.projectId,layerId,supersedesLayerId:replaced?.id ?? null,fileName:body.fileName,format:body.format,layerName:body.layerName,assetType:body.assetType,sourceIdField:body.sourceIdField,nameField:body.nameField,featureCount:features.length,createdCount,updatedCount,rejectedCount:0,status:'Published' as const,warnings:body.warnings,importedBy:req.user!.id,importedAt:now,createdAssetIds,assetSnapshots};
+      data.gisImports.unshift(importJob);
+      return {layer,importJob:{...importJob,assetSnapshots:undefined,createdAssetIds:undefined}};
+    });
+    if (!result) return res.status(404).json({error:'Project, asset type or replacement layer is not valid in the active tenant.'});
+    await log(req.user!,'IMPORTED_GIS_ASSETS','GisImport',result.importJob.id,`Published ${result.importJob.fileName}: ${result.importJob.createdCount} created, ${result.importJob.updatedCount} updated.`);
+    res.status(201).json(result);
+  });
+
+  app.post('/api/gis/imports/:id/rollback', auth, allow('authority'), async (req,res) => {
+    const result = await store.mutate((data) => {
+      const item = data.gisImports.find((candidate)=>candidate.id===req.params.id&&candidate.tenantId===req.user!.tenantId&&candidate.status==='Published');
+      if (!item) return null;
+      data.assets = data.assets.filter((asset)=>!(item.createdAssetIds ?? []).includes(asset.id));
+      (item.assetSnapshots ?? []).forEach((snapshot)=>{const index=data.assets.findIndex((asset)=>asset.id===snapshot.id);if(index>=0)data.assets[index]=snapshot;else data.assets.unshift(snapshot);});
+      const layer = data.gisLayers.find((candidate)=>candidate.id===item.layerId);
+      if (layer) layer.visible=false;
+      const superseded = item.supersedesLayerId ? data.gisLayers.find((candidate)=>candidate.id===item.supersedesLayerId&&candidate.tenantId===item.tenantId) : null;
+      if (superseded) superseded.visible=true;
+      item.status='Rolled back';
+      item.rolledBackAt=new Date().toISOString();
+      const {assetSnapshots,createdAssetIds,...safe}=item;
+      return safe;
+    });
+    if(!result)return res.status(404).json({error:'Published import not found in the active tenant.'});
+    await log(req.user!,'ROLLED_BACK_GIS_IMPORT','GisImport',result.id,`Rolled back ${result.fileName} and restored the preceding network version.`);
+    res.json(result);
   });
 
   app.get('/api/attendance', auth, async (req, res) => res.json(tenantScope((await store.all()).attendance, req.user!)));
