@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.os.Build
 import android.provider.MediaStore
 import android.os.Bundle
+import androidx.core.content.FileProvider
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.io.File
 
 private val Navy = Color(0xFF104685)
 private val Sky = Color(0xFFEAF3FB)
@@ -129,7 +131,7 @@ private fun moduleIcon(key:String)=when(key){"projects"->Icons.Outlined.AccountT
 @Composable
 private fun ModuleScreen(vm:AppViewModel,api:ApiClient,spec:ModuleSpec){
     val scope=rememberCoroutineScope();var dialog by remember{mutableStateOf(false)};var atrRecord by remember{mutableStateOf<JSONObject?>(null)};var pendingAtr by remember{mutableStateOf<JSONObject?>(null)};val context=androidx.compose.ui.platform.LocalContext.current;val location=remember{LocationController(context)};val queue=remember{OfflineQueue(context)}
-    val attendancePermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){grants->if(grants.values.any{it})scope.launch{vm.action{val project=jsonObjects(api.array("/api/projects")).firstOrNull()?:error("No assigned project is available.");val gps=location.current()?:error("Current GPS could not be acquired.");api.post("/api/attendance",JSONObject().put("projectId",project.getString("id")).put("lat",gps.latitude).put("lng",gps.longitude).put("accuracyMeters",gps.accuracy.toDouble()).put("offline",false));vm.module(api,spec)}}}
+    val attendancePermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){grants->if(grants.values.any{it})scope.launch{vm.action{val project=jsonObjects(api.array("/api/projects")).firstOrNull()?:error("No assigned project is available.");val gps=location.current()?:error("Current GPS could not be acquired.");val body=JSONObject().put("projectId",project.getString("id")).put("lat",gps.latitude).put("lng",gps.longitude).put("accuracyMeters",gps.accuracy.toDouble()).put("offline",false);try{api.post("/api/attendance",body)}catch(e:java.io.IOException){if(e is ApiException)throw e;queue.enqueue("Attendance","local-att-${System.currentTimeMillis()}",body.put("offline",true))};runCatching{vm.module(api,spec)}}}}
     val evidenceLocationPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){grants->if(grants.values.any{it})dialog=true else vm.error="Location access is required for geo-tagged evidence."}
     val atrLocationPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){grants->if(grants.values.any{it})atrRecord=pendingAtr else vm.error="Location access is required for a geo-tagged ATR."}
     LaunchedEffect(spec.key){vm.module(api,spec)}
@@ -165,7 +167,7 @@ private data class WorkflowButton(val label:String,val path:String,val body:JSON
 private fun workflowButtons(r:JSONObject,key:String,role:Role):List<WorkflowButton>{val id=r.optString("id");return when{
     key=="notifications"&&!r.optBoolean("read")->listOf(WorkflowButton("Mark read","/api/notifications/$id/read",JSONObject()))
     key=="defects"&&role==Role.CHECKER&&r.optString("checkerValidation")=="Pending"->listOf(WorkflowButton("Validate","/api/defects/$id/validate",JSONObject().put("decision","approve")),WorkflowButton("Reject","/api/defects/$id/validate",JSONObject().put("decision","reject")))
-    key=="defects"&&role==Role.MAKER&&r.optString("status")=="Assigned"->listOf(WorkflowButton("Start work","/api/defects/$id/start",JSONObject()))
+    key=="defects"&&role==Role.MAKER&&r.optString("status")=="Assigned"->listOf(WorkflowButton("Start work","/api/defects/$id/start",JSONObject().put("status","In Progress")))
     key=="defects"&&role==Role.MAKER&&r.optString("status")=="In Progress"->listOf(WorkflowButton("Submit ATR","local:atr",JSONObject()))
     key=="defects"&&role==Role.CHECKER&&r.optString("status")=="ATR Submitted"->listOf(WorkflowButton("Verify ATR","/api/defects/$id/verify-atr",JSONObject().put("decision","verify").put("note","Verified in native app")),WorkflowButton("Rework","/api/defects/$id/verify-atr",JSONObject().put("decision","rework").put("note","Further work required")))
     key=="defects"&&role==Role.CITIZEN&&r.optString("status") in setOf("Resolved","Closed")->listOf(WorkflowButton("Close · 5 stars","/api/defects/$id/feedback",JSONObject().put("rating",5).put("comment","Resolved satisfactorily in the native app").put("reopen",false)),WorkflowButton("Reopen","/api/defects/$id/feedback",JSONObject().put("rating",2).put("comment","The issue still requires attention").put("reopen",true)))
@@ -187,18 +189,24 @@ private fun workflowButtons(r:JSONObject,key:String,role:Role):List<WorkflowButt
 
 @Composable
 private fun CreateDialog(kind:String,vm:AppViewModel,api:ApiClient,onDismiss:()->Unit,onCreate:(Map<String,String>)->Unit){
+    val context=androidx.compose.ui.platform.LocalContext.current
     var first by remember{mutableStateOf("")};var second by remember{mutableStateOf("")};var third by remember{mutableStateOf("")}
-    var evidence by remember{mutableStateOf<Uri?>(null)}
+    var evidence by remember{mutableStateOf<Uri?>(null)};var pendingCameraUri by remember{mutableStateOf<Uri?>(null)}
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){evidence=it}
+    val camera=rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()){ok->if(ok)evidence=pendingCameraUri}
+    fun capture(){val dir=File(context.cacheDir,"field-evidence").apply{mkdirs()};val file=File(dir,"defect-${System.currentTimeMillis()}.jpg");pendingCameraUri=FileProvider.getUriForFile(context,"${context.packageName}.files",file);camera.launch(pendingCameraUri!!)}
     val labels=when(kind){"defects"->listOf("Issue title","Description","Severity (Low/Medium/High/Critical)");"tickets"->listOf("Subject","Description","Priority");"payments"->listOf("Invoice number","Amount","Attendance reference");"attendance"->listOf("Project ID",""," ");"projects"->listOf("Project code","Project name","Location");"assets"->listOf("Asset name","Asset type","Location");"users"->listOf("Full name","Email","Mobile");"tenants"->listOf("Organisation name","Short name","Organisation type");"inspections"->listOf("Project ID","Asset ID","Checker ID");else->listOf("Name","Description","")}
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Create ${kind.replaceFirstChar(Char::uppercase)}")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(first,{first=it},label={Text(labels[0])});if(labels[1].isNotBlank())OutlinedTextField(second,{second=it},label={Text(labels[1])});if(labels[2].isNotBlank())OutlinedTextField(third,{third=it},label={Text(labels[2])});if(kind=="defects"){OutlinedButton(onClick={picker.launch(arrayOf("image/*","video/*"))},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.PhotoCamera,null);Spacer(Modifier.width(8.dp));Text(if(evidence==null)"Attach required photo or video" else "Evidence selected")}};Text("Related project/user assignments use the first eligible record in the active tenant when not entered.",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}},confirmButton={Button(enabled=first.isNotBlank()&&(kind!="defects"||evidence!=null),onClick={onCreate(mapOf("first" to first,"second" to second,"third" to third,"evidence" to (evidence?.toString().orEmpty())))}){Text("Submit")}},dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Create ${kind.replaceFirstChar(Char::uppercase)}")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(first,{first=it},label={Text(labels[0])});if(labels[1].isNotBlank())OutlinedTextField(second,{second=it},label={Text(labels[1])});if(labels[2].isNotBlank())OutlinedTextField(third,{third=it},label={Text(labels[2])});if(kind=="defects"){Button(onClick={capture()},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.PhotoCamera,null);Spacer(Modifier.width(8.dp));Text("Capture photo")};OutlinedButton(onClick={picker.launch(arrayOf("image/*","video/*"))},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.AttachFile,null);Spacer(Modifier.width(8.dp));Text("Choose photo or video")};if(evidence!=null)Text("Evidence ready",color=Color(0xFF1A7F4B),fontWeight=FontWeight.Bold)};Text("Related project/user assignments use the first eligible record in the active tenant when not entered.",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}},confirmButton={Button(enabled=first.isNotBlank()&&(kind!="defects"||evidence!=null),onClick={onCreate(mapOf("first" to first,"second" to second,"third" to third,"evidence" to (evidence?.toString().orEmpty())))}){Text("Submit")}},dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
 }
 
 @Composable
 private fun AtrDialog(onDismiss:()->Unit,onSubmit:(String,Uri)->Unit){
-    var summary by remember{mutableStateOf("")};var evidence by remember{mutableStateOf<Uri?>(null)}
+    val context=androidx.compose.ui.platform.LocalContext.current
+    var summary by remember{mutableStateOf("")};var evidence by remember{mutableStateOf<Uri?>(null)};var pendingCameraUri by remember{mutableStateOf<Uri?>(null)}
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){evidence=it}
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Submit Action Taken Report")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(summary,{summary=it},label={Text("Rectification summary")},minLines=3);OutlinedButton(onClick={picker.launch(arrayOf("image/*","video/*"))},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.PhotoCamera,null);Spacer(Modifier.width(8.dp));Text(if(evidence==null)"Attach rectification evidence" else "Evidence selected")};Text("GPS, capture time and accuracy are stored with the evidence.",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}},confirmButton={Button(enabled=summary.length>=10&&evidence!=null,onClick={onSubmit(summary,evidence!!)}){Text("Submit ATR")}},dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
+    val camera=rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()){ok->if(ok)evidence=pendingCameraUri}
+    fun capture(){val dir=File(context.cacheDir,"field-evidence").apply{mkdirs()};val file=File(dir,"atr-${System.currentTimeMillis()}.jpg");pendingCameraUri=FileProvider.getUriForFile(context,"${context.packageName}.files",file);camera.launch(pendingCameraUri!!)}
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Submit Action Taken Report")},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(summary,{summary=it},label={Text("Rectification summary")},minLines=3);Button(onClick={capture()},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.PhotoCamera,null);Spacer(Modifier.width(8.dp));Text("Capture photo")};OutlinedButton(onClick={picker.launch(arrayOf("image/*","video/*"))},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.AttachFile,null);Spacer(Modifier.width(8.dp));Text("Choose photo or video")};if(evidence!=null)Text("Evidence ready",color=Color(0xFF1A7F4B),fontWeight=FontWeight.Bold);Text("GPS, capture time and accuracy are stored with the evidence.",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}},confirmButton={Button(enabled=summary.length>=10&&evidence!=null,onClick={onSubmit(summary,evidence!!)}){Text("Submit ATR")}},dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
 }
 
 private suspend fun submitAtr(record:JSONObject,summary:String,uri:Uri,api:ApiClient,context:android.content.Context){

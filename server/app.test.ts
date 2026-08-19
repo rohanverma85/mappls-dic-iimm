@@ -89,6 +89,20 @@ describe('IIMM API', () => {
     expect(result.body.status).toBe('Out of radius');
   });
 
+  it('syncs offline Maker attendance and still computes the geofence on the server', async () => {
+    const maker = await login('usr-maker-1');
+    const entityId = 'local-attendance-test';
+    const synced = await request(app).post('/api/sync').set(auth(maker)).send({ operations:[{
+      entityType:'Attendance', entityId, clientUpdatedAt:new Date().toISOString(),
+      payload:{ projectId:'prj-1', lat:28.6139, lng:77.2090, accuracyMeters:9, offline:true, withinGeofence:true },
+    }] }).expect(200);
+    expect(synced.body.applied).toContain(entityId);
+    const attendance = await request(app).get('/api/attendance').set(auth(maker)).expect(200);
+    const record = attendance.body.find((item:{projectId:string}) => item.projectId === 'prj-1');
+    expect(record.withinGeofence).toBe(false);
+    expect(record.status).toBe('Out of radius');
+  });
+
   it('returns tenant-scoped GIS layers, assets, projects and defects', async () => {
     const authority = await login('usr-auth-1');
     const result = await request(app).get('/api/gis/overview').set(auth(authority)).expect(200);

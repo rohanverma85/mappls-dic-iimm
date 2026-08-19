@@ -241,7 +241,7 @@ struct RecordView: View {
       ]
     }
     if module.id == "defects", role == .maker, status == "Assigned" {
-      return [.init(label: "Start work", path: "/api/defects/\(id)/start", body: [:])]
+      return [.init(label: "Start work", path: "/api/defects/\(id)/start", body: ["status": "In Progress"])]
     }
     if module.id == "defects", role == .maker, status == "In Progress" {
       return [.init(label: "Submit ATR", path: "local:atr", body: [:])]
@@ -332,12 +332,19 @@ struct ATRView: View {
   @State private var summary = ""
   @State private var evidenceItem: PhotosPickerItem?
   @State private var evidenceData: Data?
+  @State private var showingCamera = false
   var body: some View {
     NavigationStack {
       Form {
         TextField("Rectification summary", text: $summary, axis: .vertical).lineLimit(3...6)
+        Button {
+          if CameraPicker.isAvailable { showingCamera = true }
+          else { app.error = "The camera is unavailable in this simulator. Choose a photo or video instead." }
+        } label: {
+          Label("Capture rectification photo", systemImage: "camera.fill")
+        }
         PhotosPicker(selection: $evidenceItem, matching: .any(of: [.images, .videos])) {
-          Label(evidenceData == nil ? "Attach rectification evidence" : "Evidence selected", systemImage: "camera")
+          Label(evidenceData == nil ? "Choose photo or video" : "Evidence selected", systemImage: "photo.on.rectangle")
         }.onChange(of: evidenceItem) { _, item in
           Task { evidenceData = try? await item?.loadTransferable(type: Data.self) }
         }
@@ -347,7 +354,9 @@ struct ATRView: View {
         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isPresented = false } }
         ToolbarItem(placement: .confirmationAction) { Button("Submit") { Task { await submit() } }.disabled(summary.count < 10 || evidenceData == nil) }
       }
-    }.task { location.request() }
+    }.task { location.request() }.sheet(isPresented: $showingCamera) {
+      CameraPicker { evidenceData = $0 }
+    }
   }
   private func submit() async {
     await app.mutate {
@@ -369,6 +378,7 @@ struct CreateView: View {
   @State private var third = ""
   @State private var evidenceItem: PhotosPickerItem?
   @State private var evidenceData: Data?
+  @State private var showingCamera = false
   var labels: [String] {
     switch module.id {
     case "defects": return ["Issue title", "Description", "Severity"]
@@ -389,8 +399,14 @@ struct CreateView: View {
         if !labels[1].isEmpty { TextField(labels[1], text: $second) }
         if !labels[2].isEmpty { TextField(labels[2], text: $third) }
         if module.id == "defects" {
+          Button {
+            if CameraPicker.isAvailable { showingCamera = true }
+            else { app.error = "The camera is unavailable in this simulator. Choose a photo or video instead." }
+          } label: {
+            Label("Capture issue photo", systemImage: "camera.fill")
+          }
           PhotosPicker(selection: $evidenceItem, matching: .any(of: [.images, .videos])) {
-            Label(evidenceData == nil ? "Attach required photo or video" : "Evidence selected", systemImage: "camera")
+            Label(evidenceData == nil ? "Choose required photo or video" : "Evidence selected", systemImage: "photo.on.rectangle")
           }.onChange(of: evidenceItem) { _, item in
             Task { evidenceData = try? await item?.loadTransferable(type: Data.self) }
           }
@@ -406,7 +422,9 @@ struct CreateView: View {
           Button("Submit") { Task { await submit() } }.disabled(first.isEmpty || (module.id == "defects" && evidenceData == nil))
         }
       }
-    }.task { if module.id == "attendance" || module.id == "defects" { location.request() } }
+    }.task { if module.id == "attendance" || module.id == "defects" { location.request() } }.sheet(isPresented: $showingCamera) {
+      CameraPicker { evidenceData = $0 }
+    }
   }
   func submit() async {
     await app.mutate {
@@ -485,7 +503,17 @@ struct CreateView: View {
         ]
       default: return
       }
-      _ = try await app.api.post(path, body: body)
+      do {
+        _ = try await app.api.post(path, body: body)
+      } catch {
+        let networkFailure = (error as NSError).domain == NSURLErrorDomain
+        guard module.id == "attendance", networkFailure else { throw error }
+        var queuedBody = body
+        queuedBody["offline"] = true
+        app.queue.enqueue(entityType: "Attendance", entityId: "local-att-\(Int(Date().timeIntervalSince1970 * 1000))", payload: queuedBody)
+        isPresented = false
+        return
+      }
       await app.load(module)
       isPresented = false
     }

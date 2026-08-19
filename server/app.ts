@@ -688,7 +688,7 @@ export function createApp() {
   });
   app.post('/api/sync/conflicts/:id/resolve',auth,allow('checker','authority'),async(req,res)=>{const body=z.object({decision:z.enum(['keep-server','reviewed-client']),note:z.string().min(3)}).parse(req.body);const resolved=await store.mutate((data)=>{const index=data.syncConflicts.findIndex((item)=>item.id===req.params.id&&item.tenantId===req.user!.tenantId);if(index<0)return null;return data.syncConflicts.splice(index,1)[0];});if(!resolved)return res.status(404).json({error:'Sync conflict not found.'});await log(req.user!,'RESOLVED_SYNC_CONFLICT',resolved.entityType,resolved.entityId,`${body.decision}: ${body.note}`);res.json({ok:true,id:resolved.id});});
   app.post('/api/sync', auth, allow('maker','checker'), async (req, res) => {
-    const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
+    const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect','Attendance']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
     const result = await store.mutate((data) => {
       const applied:string[] = [];
       const conflicts = [];
@@ -710,6 +710,24 @@ export function createApp() {
           const defect = data.defects.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
           const parsed = z.object({ status:z.enum(['In Progress','Reopened']).optional() }).safeParse(operation.payload);
           if (defect && parsed.success) { Object.assign(defect, parsed.data); applied.push(operation.entityId); }
+        }
+        if (operation.entityType === 'Attendance' && req.user!.role === 'maker') {
+          const parsed = z.object({ projectId:z.string(), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), accuracyMeters:z.number().min(0).max(10_000).optional() }).safeParse(operation.payload);
+          if (!parsed.success) continue;
+          const project = data.projects.find((item) => item.id === parsed.data.projectId && item.tenantId === req.user!.tenantId && item.makerIds.includes(req.user!.id));
+          if (!project) continue;
+          const today = new Date().toISOString().slice(0,10);
+          const existing = data.attendance.find((item) => item.makerId === req.user!.id && item.projectId === project.id && item.date === today);
+          if (!existing) {
+            const distanceMeters = haversineMeters({lat:parsed.data.lat,lng:parsed.data.lng},project.center);
+            const withinGeofence = distanceMeters <= project.geofenceRadiusMeters;
+            data.attendance.unshift({
+              id:id('att'), tenantId:req.user!.tenantId!, projectId:project.id, makerId:req.user!.id,
+              date:today, checkIn:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}), checkOut:null,
+              lat:parsed.data.lat, lng:parsed.data.lng, withinGeofence, status:withinGeofence ? 'Present' : 'Out of radius',
+            });
+          }
+          applied.push(operation.entityId);
         }
       }
       return { applied, conflicts };
