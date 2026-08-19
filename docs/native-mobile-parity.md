@@ -12,7 +12,7 @@ This matrix records the Android/iOS delivery contract against the shared IIMM AP
 | Asset registry | Native | Native | create/manage attributes, condition and Point geometry with project linkage |
 | Operational GIS map | Native | Native | project, asset, defect and published network overlays; coordinate validation and map selection |
 | KML/KMZ/Shapefile import | Native | Native | server parsing, field mapping, project/asset mapping, version replacement and rollback |
-| Official Mappls native basemap | Artifact supplied; runtime rejected | Artifact supplied; runtime callback timed out | Android files must match package + signing SHA-256; iOS files must match bundle ID; both apps expose a safe diagnostic instead of crashing or substituting another provider |
+| Official Mappls native basemap | Verified live | Artifact supplied; SDK returns `Method Not allowed` | Android basemap and operational overlays render in the emulator; the iOS Mappls application still needs native Map SDK entitlement/authorization; both apps expose a safe diagnostic instead of crashing or substituting another provider |
 | Reverse-geocoded address | Native | Native | server Mappls proxy; production five-role contract verifies a non-empty address |
 | Geo-fenced attendance | Native, Maker only | Native, Maker only | device GPS/accuracy, server distance decision, offline queue |
 | Joint/RFI inspections | Native | Native | schedule, accept/reject/not-ready, checklist pass/flag/note, pause/resume/complete; completed flags create duplicate-safe linked defects |
@@ -29,10 +29,10 @@ This matrix records the Android/iOS delivery contract against the shared IIMM AP
 
 - Web/API: TypeScript checks, interaction audit, 17 server workflow tests and production build pass through `npm run check`.
 - Production API: `npm run check:native-api` passes for Tenant Administrator, Authority, Maker, Checker and Citizen at `https://diciimm.mapplsgov.com`.
-- Android: `./gradlew :app:assembleDebug` succeeds with `processDebugMapplsServices`; the debug APK installs and cold-launches on the local Android emulator. SDK rejection is caught without crashing.
-- iOS: the locally signed `IIMM` Debug scheme builds for `iphonesimulator`, copies `i.conf` and `i.olf`, installs and launches on the local iPhone simulator. Secure session restoration and cancellation handling are verified.
+- Android: `./gradlew :app:assembleDebug` succeeds with `processDebugMapplsServices`; the debug APK installs and cold-launches on the local Android emulator. The official basemap, project marker and GIS line overlay render around Jabalpur without authorization errors.
+- iOS: the locally signed `IIMM` Debug scheme builds for `iphonesimulator`, copies `i.conf` and `i.olf`, installs and launches on the local iPhone simulator. Secure session restoration and cancellation handling are verified. The regenerated SDK session callback returns `Method Not allowed`.
 - Replit: deployment `0ad63f5a-c44f-4fab-a2fe-6944ed7f5c1f` is live on the primary production URL.
 
-## Remaining Mappls credential correction
+## Remaining iOS Mappls authorization correction
 
-Credential archives were supplied and integrated locally on 20 August 2026; all secret and generated credential files remain excluded from Git. The Android SDK reports that the supplied pair does not match package `com.mappls.dic.iimm` and/or debug SHA-256 `0F:2B:E5:D5:DB:3F:B3:C6:18:88:B1:16:B4:6E:3D:A3:41:53:59:B1:17:D6:FC:7E:EE:2F:52:04:66:5C:D1:F4`. The iOS pair is present in the signed app, but the SDK did not complete authentication within the app's 15-second verification window. Corrected console artifacts remain the only external blocker to claiming live native Mappls basemaps.
+Regenerated credential archives were integrated locally on 20 August 2026; all secret and generated credential files remain excluded from Git. Android is now verified against package `com.mappls.dic.iimm` and debug SHA-256 `0F:2B:E5:D5:DB:3F:B3:C6:18:88:B1:16:B4:6E:3D:A3:41:53:59:B1:17:D6:FC:7E:EE:2F:52:04:66:5C:D1:F4`. The iOS pair is present in the app bundle for `com.mappls.dic.iimm`, but `MapplsMapAuthenticator` rejects the SDK session with `Method Not allowed`. Confirm that the iOS Auth Console application is enabled for the native Map SDK and regenerate its pair. Physical-device verification additionally requires an Apple Development signing identity.

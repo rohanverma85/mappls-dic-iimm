@@ -49,7 +49,7 @@ final class MapplsSDKState: ObservableObject {
     case .missing: "Map credentials required"
     case .loading: "Connecting to Mappls"
     case .ready: "Mappls map connected"
-    case .failed: "Map configuration needs attention"
+    case .failed: "Mappls authorization unavailable"
     }
   }
   var detail: String {
@@ -57,7 +57,7 @@ final class MapplsSDKState: ObservableObject {
     case .missing: "Add i.conf and i.olf to the app target. Operational GIS data remains available."
     case .loading: "Validating the application and preparing the vector basemap."
     case .ready: "Official vector basemap, project geometry and operational overlays are available."
-    case .failed: "The supplied files do not match this bundle or signing configuration. Operational GIS data remains available."
+    case .failed(let message): "Mappls rejected the SDK session: \(message) Operational GIS data remains available."
     }
   }
   var symbol: String {
