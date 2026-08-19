@@ -18,6 +18,7 @@ const activeStatuses = new Set(['Under Checker Review','Assigned','In Progress',
 const severityRank = ['Low','Medium','High','Critical'] as const;
 const roleSchema = z.enum(['tenant_admin','authority','maker','checker','citizen']);
 const uploadDir = path.resolve(process.cwd(),'data/uploads');
+const mapplsAccessToken = () => process.env.MAPPLS_ACCESS_TOKEN?.trim() || process.env.mappls_access_token?.trim() || null;
 
 const safeUser = (user: User) => user;
 const tokenFor = (user: User) => Buffer.from(`iimm:${user.id}`).toString('base64url');
@@ -133,7 +134,7 @@ export function createApp() {
   });
 
   app.get('/api/mappls/config', auth, (_req, res) => {
-    const accessToken = process.env.MAPPLS_ACCESS_TOKEN?.trim() || null;
+    const accessToken = mapplsAccessToken();
     res.json({
       provider:'Mappls', configured:Boolean(accessToken), accessToken,
       sdkVersion:'3.0', layer:'vector',
@@ -143,7 +144,7 @@ export function createApp() {
 
   app.get('/api/mappls/reverse-geocode', auth, async (req, res) => {
     const parsed = z.object({ lat:z.coerce.number().min(-90).max(90), lng:z.coerce.number().min(-180).max(180) }).parse(req.query);
-    const accessToken = process.env.MAPPLS_ACCESS_TOKEN?.trim();
+    const accessToken = mapplsAccessToken();
     if (!accessToken) return res.json({ configured:false, address:`${parsed.lat.toFixed(6)}, ${parsed.lng.toFixed(6)}`, source:'Device coordinates' });
     const url = new URL('https://search.mappls.com/search/address/rev-geocode');
     url.searchParams.set('lat', String(parsed.lat));
@@ -291,7 +292,7 @@ export function createApp() {
   app.get('/api/gis/overview', auth, async (req, res) => {
     const data = await store.all();
     res.json({
-      provider:'Mappls', configured:Boolean(process.env.MAPPLS_ACCESS_TOKEN?.trim()),
+      provider:'Mappls', configured:Boolean(mapplsAccessToken()),
       layers:tenantScope(data.gisLayers,req.user!), assets:tenantScope(data.assets,req.user!),
       defects:visibleToUser(data.defects,req.user!), projects:tenantScope(data.projects,req.user!),
     });
