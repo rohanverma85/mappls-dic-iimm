@@ -28,6 +28,7 @@ type MapplsMapInstance = {
   on?:(event:string,callback:(event?:unknown)=>void)=>void;
   addListener?:(event:string,callback:(event?:unknown)=>void)=>unknown;
   setCenter?:(position:{lat:number;lng:number}|[number,number])=>void;
+  resize?:()=>void;
   remove?:()=>void;
 };
 
@@ -46,19 +47,27 @@ let sdkPromise: Promise<MapplsGlobal> | null = null;
 function loadMappls(accessToken:string, version:string) {
   if (window.mappls || window.Mappls) return Promise.resolve((window.mappls || window.Mappls)!);
   if (sdkPromise) return sdkPromise;
-  sdkPromise = new Promise((resolve,reject) => {
-    const callback = `iimmMapplsReady${Date.now()}`;
-    (window as unknown as Record<string,unknown>)[callback] = () => {
+  sdkPromise = new Promise<MapplsGlobal>((resolve,reject) => {
+    const finish = () => {
       const sdk = window.mappls || window.Mappls;
       if (sdk) resolve(sdk); else reject(new Error('Mappls SDK loaded without a map object.'));
-      delete (window as unknown as Record<string,unknown>)[callback];
     };
+    const fail = () => reject(new Error('Unable to load the Mappls Web Maps SDK.'));
     const script = document.createElement('script');
-    script.src = `https://sdk.mappls.com/map/sdk/web?v=${encodeURIComponent(version)}&access_token=${encodeURIComponent(accessToken)}&layer=vector&callback=${callback}`;
+    // Keep the loader URL identical to the current Mappls Web Maps JS v3
+    // documentation. In particular, v3 does not require a JSONP callback.
+    script.src = `https://sdk.mappls.com/map/sdk/web?v=${encodeURIComponent(version)}&access_token=${encodeURIComponent(accessToken)}&layer=vector`;
+    script.dataset.iimmMapplsSdk = 'true';
     script.async = true;
     script.defer = true;
-    script.onerror = () => reject(new Error('Unable to load the Mappls Web Maps SDK.'));
+    script.onload = finish;
+    script.onerror = fail;
     document.head.appendChild(script);
+  }).catch((error) => {
+    // A transient network or authorization failure must not poison every map
+    // mounted later in the same SPA session.
+    sdkPromise = null;
+    throw error;
   });
   return sdkPromise;
 }
@@ -103,10 +112,12 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
     let disposed=false;
     loadMappls(config.accessToken,config.sdkVersion).then((sdk)=>{
       if(disposed)return;
-      const map = new sdk.Map(id.current,{center:[center.lat,center.lng],zoom:compact?16:14,zoomControl:true,location:true});
+      const map = new sdk.Map(id.current,{center:{lat:center.lat,lng:center.lng},zoom:compact?16:14,zoomControl:true,location:true});
       mapRef.current=map;
-      setState('live');
+      let drawn=false;
       const draw=()=>{
+        if(drawn)return;
+        drawn=true;
         layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:1}); });
         assets.forEach((asset)=>{
           if(asset.geometry.type==='Point'&&sdk.Marker)new sdk.Marker({map,position:{lat:asset.geometry.coordinates[1],lng:asset.geometry.coordinates[0]},fitbounds:false,popupHtml:`<strong>${asset.name}</strong><br/>${asset.type}<br/>${asset.condition}`});
@@ -115,7 +126,11 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
         defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
         projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
       };
-      if(map.on)map.on('load',draw);else draw();
+      const ready=()=>{if(disposed)return;map.resize?.();draw();setState('live');};
+      if(map.on)map.on('load',ready);else ready();
+      // Mappls adds MapLibre classes after construction. Resize on the next
+      // frame so the SDK observes the final, full-height container geometry.
+      window.requestAnimationFrame(()=>map.resize?.());
       if(selectable){
         const select=(event?:unknown)=>{const point=pointFromMapEvent(event);if(!point)return;if(selectedMarkerRef.current?.setPosition)selectedMarkerRef.current.setPosition(point);else if(sdk.Marker)selectedMarkerRef.current=new sdk.Marker({map,position:point,fitbounds:false,popupHtml:'<strong>Selected location</strong>'});onSelectRef.current?.(point);};
         if(map.addListener)map.addListener('click',select);else map.on?.('click',select);
