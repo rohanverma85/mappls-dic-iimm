@@ -22,18 +22,24 @@ The sources do not provide an implementable contract for KML or Shapefile ingest
 
 Deep GIS/Bhuvan integration is explicitly listed as out of scope for the prototype, with the instruction that the architecture should not preclude it.
 
-## Implemented safe foundation
+## Implemented prototype assumption set
 
 - Tenant-scoped GIS layer, GeoJSON geometry, style, visibility, status and version data model.
 - Mappls Web Maps SDK v3.0 integration behind a domain-whitelisted `MAPPLS_ACCESS_TOKEN`.
 - Functional no-token network-map preview, so geometry workflows remain testable.
 - Project circles, asset/network geometry and defects on one operational map.
+- Authority-only KML, KMZ and zipped Shapefile upload from web, Android and iOS.
+- Server-side KML/KMZ/Shapefile parsing and normalization to supported GeoJSON Point, Line/MultiLine and Polygon/MultiPolygon features.
+- Review-before-publish field selection for source ID and display name, with deterministic generated values when fields are absent.
+- One imported feature becomes one project-scoped asset; matching source IDs update the existing asset instead of silently duplicating it.
+- Versioned layer replacement keeps the preceding layer available for an auditable rollback.
+- Rollback deletes assets created by the import, restores snapshots for updated assets and reactivates the superseded layer.
 - Server-calculated Haversine geofence results for attendance and defects.
 - Device GPS capture, reverse-geocode proxy, accuracy recording, and authenticated tenant-scoped photo/video uploads for defect and ATR evidence.
 - Maker start-work → ATR → Checker verify/rework → Citizen confirm/reopen lifecycle.
 - Server-timestamp offline conflict queue for manual review.
 - Authority-only GeoJSON publication endpoint as a stable interchange seam.
 
-## Client decisions needed before KML/SHP production implementation
+## Assumptions still requiring client review before production
 
-Please answer the nine items above and provide a representative KML/KMZ and/or zipped Shapefile, plus the expected asset register after import. These inputs determine data integrity and cannot be inferred safely from the PRD.
+The prototype deliberately does not perform topology repair, snapping, chainage/linear referencing, arbitrary source-CRS transformation, draft/publish multi-party approval, or direct Mappls mGIS workspace synchronization. The client should review the nine policy items above and provide representative production files plus the expected asset register. The current importer is isolated behind versioned import records so these rules can be revised, rolled back and re-merged without rewriting the field workflows.

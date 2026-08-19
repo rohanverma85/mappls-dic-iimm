@@ -1,7 +1,8 @@
 # IIMM native mobile applications — architecture and delivery contract
 
 Status: implementation branch `agent/native-mobile-apps`
-API base URL: `https://mappls-dic-iimm.replit.app`
+Primary production URL: `https://diciimm.mapplsgov.com`
+Replit alias/API URL: `https://mappls-dic-iimm.replit.app`
 Android application ID: `com.mappls.dic.iimm`
 iOS bundle ID: `com.mappls.dic.iimm`
 
