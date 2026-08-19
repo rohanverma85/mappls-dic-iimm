@@ -112,7 +112,7 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
     let disposed=false;
     loadMappls(config.accessToken,config.sdkVersion).then((sdk)=>{
       if(disposed)return;
-      const map = new sdk.Map(id.current,{center:{lat:center.lat,lng:center.lng},zoom:compact?16:14,zoomControl:true,location:true});
+      const map = new sdk.Map(id.current,{center:{lat:center.lat,lng:center.lng},zoom:compact?16:14,zoomControl:true});
       mapRef.current=map;
       let drawn=false;
       const draw=()=>{
