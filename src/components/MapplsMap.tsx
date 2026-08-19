@@ -28,6 +28,9 @@ type MapplsMapInstance = {
   on?:(event:string,callback:(event?:unknown)=>void)=>void;
   addListener?:(event:string,callback:(event?:unknown)=>void)=>unknown;
   setCenter?:(position:{lat:number;lng:number}|[number,number])=>void;
+  setZoom?:(zoom:number)=>void;
+  loaded?:()=>boolean;
+  isStyleLoaded?:()=>boolean;
   resize?:()=>void;
   remove?:()=>void;
 };
@@ -110,33 +113,58 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
     if (!config) return;
     if (!config.configured || !config.accessToken) { setState('fallback'); return; }
     let disposed=false;
+    let settleTimer:number|undefined;
     loadMappls(config.accessToken,config.sdkVersion).then((sdk)=>{
       if(disposed)return;
-      const map = new sdk.Map(id.current,{center:{lat:center.lat,lng:center.lng},zoom:compact?16:14,zoomControl:true});
+      // Keep construction to the minimal, documented Web Maps JS v3 shape.
+      // Zoom and controls are applied after the SDK has created its canvas;
+      // some SDK builds throw internally while normalising optional settings.
+      const map = new sdk.Map(id.current,{center:{lat:center.lat,lng:center.lng}});
       mapRef.current=map;
-      let drawn=false;
-      const draw=()=>{
-        if(drawn)return;
-        drawn=true;
-        layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:1}); });
-        assets.forEach((asset)=>{
-          if(asset.geometry.type==='Point'&&sdk.Marker)new sdk.Marker({map,position:{lat:asset.geometry.coordinates[1],lng:asset.geometry.coordinates[0]},fitbounds:false,popupHtml:`<strong>${asset.name}</strong><br/>${asset.type}<br/>${asset.condition}`});
-          else if(sdk.addGeoJson)new sdk.addGeoJson({map,data:{type:'FeatureCollection',features:[{type:'Feature',geometry:asset.geometry,properties:{stroke:'#027a48','stroke-width':4,'stroke-opacity':0.9,fill:'#027a48','fill-opacity':0.2}}]},fitbounds:false,cType:1});
-        });
-        defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
-        projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
+      const rendered=new Set<string>();
+      const render=(key:string,operation:()=>void)=>{
+        if(rendered.has(key))return;
+        try{operation();rendered.add(key);}catch{/* the settlement loop retries after the style becomes ready */}
       };
-      const ready=()=>{if(disposed)return;map.resize?.();draw();setState('live');};
-      if(map.on)map.on('load',ready);else ready();
-      // Mappls adds MapLibre classes after construction. Resize on the next
-      // frame so the SDK observes the final, full-height container geometry.
-      window.requestAnimationFrame(()=>map.resize?.());
+      const draw=()=>{
+        layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>render(`layer:${layer.id}`,()=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:0}); }));
+        assets.forEach((asset)=>{
+          render(`asset:${asset.id}`,()=>{
+            if(asset.geometry.type==='Point'&&sdk.Marker)new sdk.Marker({map,position:{lat:asset.geometry.coordinates[1],lng:asset.geometry.coordinates[0]},fitbounds:false,popupHtml:`<strong>${asset.name}</strong><br/>${asset.type}<br/>${asset.condition}`});
+            else if(sdk.addGeoJson)new sdk.addGeoJson({map,data:{type:'FeatureCollection',features:[{type:'Feature',geometry:asset.geometry,properties:{stroke:'#027a48','stroke-width':4,'stroke-opacity':0.9,fill:'#027a48','fill-opacity':0.2}}]},fitbounds:false,cType:0});
+          });
+        });
+        defects.forEach((defect)=>render(`defect:${defect.id}`,()=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); }));
+        projects.forEach((project)=>render(`project:${project.id}`,()=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); }));
+      };
+      let attempts=0;
+      const settle=()=>{
+        if(disposed)return;
+        attempts+=1;
+        try{map.resize?.();}catch{/* the canvas probe below remains authoritative */}
+        try{map.setZoom?.(compact?16:14);}catch{/* retry after the SDK finishes its style setup */}
+        const host=document.getElementById(id.current);
+        const canvasReady=Boolean(host?.querySelector('canvas'));
+        let styleReady=canvasReady;
+        try{styleReady=map.loaded?.()??map.isStyleLoaded?.()??canvasReady;}catch{/* Mappls can render before its readiness helpers settle */}
+        if(canvasReady)setState('live');
+        if(styleReady||canvasReady)draw();
+        if((!canvasReady||rendered.size<layers.filter((layer)=>layer.visible&&layer.status==='Published').length+assets.length+defects.length+projects.length)&&attempts<20){
+          settleTimer=window.setTimeout(settle,300);
+        }
+      };
+      const ready=()=>{if(disposed)return;draw();setState('live');settle();};
+      if(map.on)map.on('load',ready);else if(map.addListener)map.addListener('load',ready);
+      // The current Mappls loader can create a usable MapLibre canvas without
+      // emitting its public load event. Polling the actual canvas keeps the map
+      // live and gives operational overlays a bounded retry window.
+      window.requestAnimationFrame(settle);
       if(selectable){
         const select=(event?:unknown)=>{const point=pointFromMapEvent(event);if(!point)return;if(selectedMarkerRef.current?.setPosition)selectedMarkerRef.current.setPosition(point);else if(sdk.Marker)selectedMarkerRef.current=new sdk.Marker({map,position:point,fitbounds:false,popupHtml:'<strong>Selected location</strong>'});onSelectRef.current?.(point);};
         if(map.addListener)map.addListener('click',select);else map.on?.('click',select);
       }
     }).catch(()=>setState('error'));
-    return()=>{disposed=true;selectedMarkerRef.current?.remove?.();selectedMarkerRef.current=null;mapRef.current?.remove?.();mapRef.current=null;};
+    return()=>{disposed=true;if(settleTimer)window.clearTimeout(settleTimer);selectedMarkerRef.current?.remove?.();selectedMarkerRef.current=null;mapRef.current?.remove?.();mapRef.current=null;};
   },[config,compact,layerSignature,assetSignature,defectSignature,projectSignature,selectable]);
 
   return <div className={`mappls-shell ${compact?'compact':''} ${className}`}>
