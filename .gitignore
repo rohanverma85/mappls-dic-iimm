@@ -8,3 +8,15 @@ data/uploads/
 .env.*
 !.env.example
 coverage/
+mobile/android/*.jks
+mobile/android/*.keystore
+mobile/android/app/*.a.conf
+mobile/android/app/*.a.olf
+mobile/android/local.properties
+mobile/android/.gradle/
+mobile/android/**/build/
+mobile/ios/IIMM/Resources/Mappls/i.conf
+mobile/ios/IIMM/Resources/Mappls/i.olf
+mobile/ios/DerivedData/
+mobile/ios/*.xcworkspace/xcuserdata/
+mobile/ios/*.xcodeproj/xcuserdata/

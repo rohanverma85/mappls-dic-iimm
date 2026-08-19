@@ -1,0 +1,128 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct FieldMapView: View {
+  @EnvironmentObject var app: AppModel
+  @StateObject private var location = LocationController()
+  @State private var selected: MapMarker?
+  @State private var address = ""
+  var body: some View {
+    VStack(spacing: 0) {
+      NativeMap(dataset: app.map, selected: $selected).ignoresSafeArea(edges: .horizontal)
+      VStack(alignment: .leading, spacing: 8) {
+        Text(selected?.title ?? "Tap the map or use GPS").bold()
+        Text(
+          address.isEmpty
+            ? selected.map { String(format: "%.6f, %.6f", $0.lat, $0.lng) }
+              ?? "Projects, assets, GIS networks and defects" : address
+        ).font(.caption).foregroundStyle(.secondary)
+        Button {
+          location.request()
+        } label: {
+          Label("Use current GPS", systemImage: "location.circle.fill").frame(maxWidth: .infinity)
+        }.buttonStyle(.borderedProminent)
+      }.padding().background(.background)
+    }.navigationTitle("Field map").navigationBarTitleDisplayMode(.inline).task {
+      await app.loadMap()
+    }.onChange(of: selected) { _, value in
+      guard let value else { return }
+      Task {
+        address =
+          (try? await app.api.reverse(lat: value.lat, lng: value.lng))
+          ?? "\(value.lat), \(value.lng)"
+      }
+    }.onChange(of: location.location) { _, value in
+      guard let value else { return }
+      selected = .init(
+        lat: value.coordinate.latitude, lng: value.coordinate.longitude, title: "Device GPS",
+        kind: "Current location")
+    }
+  }
+}
+
+struct SearchView: View {
+  @EnvironmentObject var app: AppModel
+  @State private var query = ""
+  var body: some View {
+    List {
+      ForEach(Array(app.search.enumerated()), id: \.offset) { _, record in
+        VStack(alignment: .leading) {
+          Text(title(record)).bold()
+          Text(subtitle(record)).font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }.navigationTitle("Search").searchable(text: $query, prompt: "All IIMM records").onChange(
+      of: query
+    ) { _, value in
+      Task {
+        try? await Task.sleep(for: .milliseconds(250))
+        if query == value { await app.find(value) }
+      }
+    }
+  }
+}
+
+struct MoreView: View {
+  @EnvironmentObject var app: AppModel
+  @State private var report = CSVDocument()
+  @State private var reportName = "iimm-report.csv"
+  @State private var exporting = false
+  var body: some View {
+    List {
+      if let user = app.session?.user {
+        Section {
+          Label {
+            VStack(alignment: .leading) {
+              Text(user.name).bold()
+              Text("\(user.designation) · \(user.role.label)").font(.caption)
+              Text(user.email).font(.caption).foregroundStyle(.secondary)
+            }
+          } icon: {
+            Image(systemName: "person.crop.circle.fill").font(.largeTitle).foregroundStyle(
+              Color.iimmNavy)
+          }
+        }
+      }
+      Section {
+        Button("Mark all notifications read") {
+          Task { await app.mutate { _ = try await app.api.post("/api/notifications/read-all") } }
+        }
+        Button("Sign out", role: .destructive) { app.logout() }
+      }
+      if let role = app.session?.user.role, [.tenantAdmin, .authority, .checker].contains(role) {
+        Section("CSV reports") {
+          ForEach(["projects", "assets", "defects", "payments", "attendance"], id: \.self) { type in
+            Button("Export \(type.capitalized)") { Task { await export(type) } }
+          }
+        }
+      }
+      Section("Build") {
+        Text("Native 1.0.0")
+        Text("API \(APIClient.base.absoluteString)")
+        Text("Mappls credentials: \(credentials ? "installed":"required")")
+      }
+    }.navigationTitle("More").fileExporter(isPresented: $exporting, document: report, contentType: .commaSeparatedText, defaultFilename: reportName) { result in
+      if case .failure(let error) = result { app.error = error.localizedDescription }
+    }
+  }
+  private var credentials: Bool {
+    Bundle.main.url(forResource: "i", withExtension: "conf") != nil
+      && Bundle.main.url(forResource: "i", withExtension: "olf") != nil
+  }
+  private func export(_ type: String) async {
+    await app.mutate {
+      report = CSVDocument(data: try await app.api.download("/api/reports/\(type).csv"))
+      reportName = "iimm-\(type)-report.csv"
+      exporting = true
+    }
+  }
+}
+
+struct CSVDocument: FileDocument {
+  static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+  var data = Data()
+  init() {}
+  init(data: Data) { self.data = data }
+  init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+  func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}

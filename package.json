@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "audit:interactions": "node scripts/audit-interactions.mjs",
+    "check:native-api": "node scripts/check-native-api.mjs",
     "check": "npm run typecheck && npm run audit:interactions && npm run test && npm run build"
   },
   "dependencies": {
