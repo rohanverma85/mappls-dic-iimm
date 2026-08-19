@@ -32,25 +32,33 @@ struct CameraPicker: UIViewControllerRepresentable {
 
 struct FieldMapView: View {
   @EnvironmentObject var app: AppModel
+  @EnvironmentObject var mappls: MapplsSDKState
   @StateObject private var location = LocationController()
   @State private var selected: MapMarker?
   @State private var address = ""
   var body: some View {
     VStack(spacing: 0) {
       NativeMap(dataset: app.map, selected: $selected).ignoresSafeArea(edges: .horizontal)
-      VStack(alignment: .leading, spacing: 8) {
-        Text(selected?.title ?? "Tap the map or use GPS").bold()
-        Text(
-          address.isEmpty
-            ? selected.map { String(format: "%.6f, %.6f", $0.lat, $0.lng) }
-              ?? "Projects, assets, GIS networks and defects" : address
-        ).font(.caption).foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 11) {
+          IIMMSymbolTile(symbol: selected == nil ? mappls.symbol : "mappin.and.ellipse", color: selected == nil ? mappls.color : .iimmBlue)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(selected?.title ?? (mappls.ready ? "Tap the map or use GPS" : mappls.title)).font(.headline)
+            Text(
+              address.isEmpty
+                ? selected.map { String(format: "%.6f, %.6f", $0.lat, $0.lng) }
+                  ?? (mappls.ready ? "Projects, assets, GIS networks and defects" : mappls.detail) : address
+            ).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+          }
+          Spacer()
+        }
         Button {
           location.request()
         } label: {
-          Label("Use current GPS", systemImage: "location.circle.fill").frame(maxWidth: .infinity)
-        }.buttonStyle(.borderedProminent)
-      }.padding().background(.background)
+          Label("Use current GPS", systemImage: "location.circle.fill").font(.headline)
+            .frame(maxWidth: .infinity).padding(.vertical, 5)
+        }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 14))
+      }.padding(16).background(.background).shadow(color: .black.opacity(0.08), radius: 12, y: -4)
     }.navigationTitle("Field map").navigationBarTitleDisplayMode(.inline).task {
       await app.loadMap()
     }.onChange(of: selected) { _, value in
@@ -128,6 +136,7 @@ private struct SearchRecordView: View {
 
 struct MoreView: View {
   @EnvironmentObject var app: AppModel
+  @EnvironmentObject var mappls: MapplsSDKState
   @State private var report = CSVDocument()
   @State private var reportName = "iimm-report.csv"
   @State private var exporting = false
@@ -135,17 +144,24 @@ struct MoreView: View {
     List {
       if let user = app.session?.user {
         Section {
-          Label {
+          HStack(spacing: 13) {
+            IIMMSymbolTile(symbol: "person.crop.circle.fill", color: .iimmNavy)
             VStack(alignment: .leading) {
               Text(user.name).bold()
               Text("\(user.designation) · \(user.role.label)").font(.caption)
               Text(user.email).font(.caption).foregroundStyle(.secondary)
             }
-          } icon: {
-            Image(systemName: "person.crop.circle.fill").font(.largeTitle).foregroundStyle(
-              Color.iimmNavy)
+            Spacer()
           }
         }
+      }
+      Section("Map & GIS") {
+        Label {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(mappls.title)
+            Text(mappls.detail).font(.caption).foregroundStyle(.secondary)
+          }
+        } icon: { Image(systemName: mappls.symbol).foregroundStyle(mappls.color) }
       }
       Section {
         LabeledContent("Pending offline changes", value: "\(app.queue.all().count)")
@@ -164,15 +180,11 @@ struct MoreView: View {
       Section("Build") {
         Text("Native 1.0.0")
         Text("API \(APIClient.base.absoluteString)")
-        Text("Mappls credentials: \(credentials ? "installed":"required")")
+        Text("Mappls SDK: \(mappls.title)")
       }
     }.navigationTitle("More").fileExporter(isPresented: $exporting, document: report, contentType: .commaSeparatedText, defaultFilename: reportName) { result in
       if case .failure(let error) = result { app.error = error.localizedDescription }
     }
-  }
-  private var credentials: Bool {
-    Bundle.main.url(forResource: "i", withExtension: "conf") != nil
-      && Bundle.main.url(forResource: "i", withExtension: "olf") != nil
   }
   private func export(_ type: String) async {
     await app.mutate {

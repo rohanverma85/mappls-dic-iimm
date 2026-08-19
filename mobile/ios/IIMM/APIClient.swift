@@ -22,14 +22,23 @@ final class KeychainSession {
     else { return nil }
     return String(data: data, encoding: .utf8)
   }
-  func save(_ token: String) {
-    clear()
+  func save(_ token: String) throws {
     let data = Data(token.utf8)
-    SecItemAdd(
-      [
-        kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-        kSecAttrAccount as String: account, kSecValueData as String: data,
-      ] as CFDictionary, nil)
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+    ]
+    var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+    if status == errSecItemNotFound {
+      var item = query
+      item[kSecValueData as String] = data
+      item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+      status = SecItemAdd(item as CFDictionary, nil)
+    }
+    guard status == errSecSuccess else {
+      throw APIError.server("Secure session storage failed (\(status))")
+    }
   }
   func clear() {
     SecItemDelete(
@@ -67,7 +76,7 @@ final class APIClient {
       let token = result["token"] as? String, let userJSON = result["user"] as? [String: Any],
       let user = User(userJSON)
     else { throw APIError.server("Invalid login response") }
-    keys.save(token)
+    try keys.save(token)
     let tenant = (result["tenant"] as? [String: Any])?["name"] as? String
     return Session(token: token, user: user, tenantName: tenant)
   }

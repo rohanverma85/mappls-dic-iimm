@@ -25,13 +25,19 @@ final class AppModel: ObservableObject {
 
   func restoreSession() async {
     guard api.keys.token() != nil, session == nil else { return }
-    await perform {
-      guard let result = try await self.api.get("/api/session") as? [String: Any],
+    busy = true
+    do {
+      guard let result = try await api.get("/api/session") as? [String: Any],
         let token = result["token"] as? String,
         let json = result["user"] as? [String: Any], let user = User(json)
       else { throw APIError.server("Saved session is no longer valid") }
-      self.session = Session(token: token, user: user, tenantName: (result["tenant"] as? [String: Any])?["name"] as? String)
+      if session == nil {
+        session = Session(token: token, user: user, tenantName: (result["tenant"] as? [String: Any])?["name"] as? String)
+      }
+    } catch {
+      if session == nil { api.keys.clear() }
     }
+    busy = false
   }
 
   func loadDemos() async {
@@ -136,7 +142,15 @@ final class AppModel: ObservableObject {
   private func perform(_ block: @escaping () async throws -> Void) async {
     busy = true
     error = nil
-    do { try await block() } catch { self.error = error.localizedDescription }
+    do {
+      try await block()
+    } catch is CancellationError {
+      // View and network work is routinely cancelled during tab changes and app restoration.
+    } catch let urlError as URLError where urlError.code == .cancelled {
+      // A cancelled request is not a user-facing failure.
+    } catch {
+      self.error = error.localizedDescription
+    }
     busy = false
   }
 }

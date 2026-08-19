@@ -10,6 +10,7 @@
 		1961E844115788DEE42164A0 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */; };
 		39B7CBD15043BF1F9BD7875F /* LocationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E695734573968BD5F48914 /* LocationController.swift */; };
 		6378051A2E1BEB2C7E95FDFB /* UtilityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DC6FBE869E17C63863A9D6 /* UtilityViews.swift */; };
+		6EEC3103DE3F4A8AA2B1C010 /* IIMMTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */; };
 		69597B4864E79E20D8AA216B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = ECD5106781ABF37F8B52F0C2 /* README.md */; };
 		7633BB822FFF5363DEC6E575 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */; };
 		847CC2B7A36B72B0D07D102C /* NativeMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D16A80C942B93F1063050C /* NativeMap.swift */; };
@@ -24,6 +25,7 @@
 		3638216A0C4ABD8F299EBABF /* IIMMApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IIMMApp.swift; sourceTree = "<group>"; };
 		53735D06454EBCAD0D3FC496 /* IIMM.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IIMM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		63E695734573968BD5F48914 /* LocationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationController.swift; sourceTree = "<group>"; };
+		6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IIMMTheme.swift; sourceTree = "<group>"; };
 		76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A6DC6FBE869E17C63863A9D6 /* UtilityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityViews.swift; sourceTree = "<group>"; };
 		C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -66,6 +68,7 @@
 				DCC205A693CF2B449ECD0D87 /* APIClient.swift */,
 				C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */,
 				3638216A0C4ABD8F299EBABF /* IIMMApp.swift */,
+				6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */,
 				63E695734573968BD5F48914 /* LocationController.swift */,
 				76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */,
 				E1D16A80C942B93F1063050C /* NativeMap.swift */,
@@ -101,6 +104,7 @@
 			buildPhases = (
 				F4C5F7E890C8C7F3938B436D /* Sources */,
 				BE76A096632241A5765BEE29 /* Resources */,
+				6EEC3103DE3F4A8AA2B1C020 /* Copy Mappls credentials */,
 				9AE8D92C298C9A255C34B14D /* Frameworks */,
 			);
 			buildRules = (
@@ -162,6 +166,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		6EEC3103DE3F4A8AA2B1C020 /* Copy Mappls credentials */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Mappls credentials";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "SOURCE_DIR=\"${SRCROOT}/IIMM/Resources/Mappls\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nfor FILE in i.conf i.olf; do\n  if [ -f \"${SOURCE_DIR}/${FILE}\" ]; then\n    /bin/cp \"${SOURCE_DIR}/${FILE}\" \"${DEST_DIR}/${FILE}\"\n  fi\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F4C5F7E890C8C7F3938B436D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -170,6 +196,7 @@
 				AC6334CF2B6C73122843823F /* APIClient.swift in Sources */,
 				7633BB822FFF5363DEC6E575 /* AppModel.swift in Sources */,
 				B96197DC76D437FD21D8546B /* IIMMApp.swift in Sources */,
+				6EEC3103DE3F4A8AA2B1C010 /* IIMMTheme.swift in Sources */,
 				39B7CBD15043BF1F9BD7875F /* LocationController.swift in Sources */,
 				1961E844115788DEE42164A0 /* Models.swift in Sources */,
 				847CC2B7A36B72B0D07D102C /* NativeMap.swift in Sources */,

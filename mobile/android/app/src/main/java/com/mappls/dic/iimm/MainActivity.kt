@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -35,12 +37,30 @@ import java.time.Instant
 import java.io.File
 
 private val Navy = Color(0xFF104685)
+private val DeepNavy = Color(0xFF082E5A)
+private val MapplsBlue = Color(0xFF1677C8)
+private val Emerald = Color(0xFF188653)
+private val Amber = Color(0xFFE89B28)
 private val Sky = Color(0xFFEAF3FB)
+private val Mist = Color(0xFFF4F7FA)
+private val Ink = Color(0xFF152238)
+private val Muted = Color(0xFF607089)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Navy, secondary = Color(0xFF1A7F4B), surfaceVariant = Sky)) { IimmApp() } }
+        setContent {
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = Navy, onPrimary = Color.White,
+                    secondary = Emerald, onSecondary = Color.White,
+                    background = Mist, onBackground = Ink,
+                    surface = Color.White, onSurface = Ink,
+                    surfaceVariant = Sky, onSurfaceVariant = Muted,
+                    outline = Color(0xFFD2DCE8), error = Color(0xFFB42318),
+                ),
+            ) { IimmApp() }
+        }
     }
 }
 
@@ -83,17 +103,60 @@ fun IimmApp(vm: AppViewModel = viewModel()) {
 private fun LoginScreen(vm: AppViewModel, api: ApiClient) {
     val scope=rememberCoroutineScope()
     LaunchedEffect(Unit) { vm.demos(api) }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement=Arrangement.Center) {
-        Surface(color=Navy,shape=RoundedCornerShape(18.dp),modifier=Modifier.size(64.dp)){Box(contentAlignment=Alignment.Center){Text("DI",color=Color.White,fontWeight=FontWeight.Bold,style=MaterialTheme.typography.headlineSmall)}}
-        Spacer(Modifier.height(20.dp)); Text("IIMM Platform",style=MaterialTheme.typography.displaySmall,fontWeight=FontWeight.Bold); Text("Native field and governance application",color=Color.Gray)
-        Spacer(Modifier.height(28.dp)); Text("Choose a demo role",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold)
-        Spacer(Modifier.height(10.dp))
-        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),modifier=Modifier.heightIn(max=430.dp)) {
-            items(vm.demoUsers,key={it.id}) { user -> ElevatedCard(onClick={scope.launch { vm.login(api,user.id) }},modifier=Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Outlined.AccountCircle,null,tint=Navy);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(user.name,fontWeight=FontWeight.Bold);Text(user.role.label,color=Color.Gray)};Icon(Icons.Outlined.ChevronRight,null)} } }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(DeepNavy, Navy, Mist), endY = 1150f))) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().systemBarsPadding(),
+            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Column(Modifier.padding(vertical = 12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BrandMark()
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text("DIGITAL INDIA", color = Color(0xFFB9DCF7), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                            Text("IIMM Platform", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(28.dp))
+                    Text("Infrastructure work,\nconnected end to end.", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Field operations, governance approvals and citizen service in one secure workspace.", color = Color.White.copy(alpha = .82f), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            item {
+                Column(Modifier.padding(top = 14.dp, bottom = 2.dp)) {
+                    Text("Choose a demo workspace", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Role permissions are enforced by the API.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            items(vm.demoUsers,key={it.id}) { user ->
+                ElevatedCard(
+                    onClick={scope.launch { vm.login(api,user.id) }},
+                    modifier=Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = Color.White),
+                ) {
+                    Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){
+                        Surface(color = roleColor(user.role).copy(alpha = .12f), shape = RoundedCornerShape(14.dp)) {
+                            Icon(roleIcon(user.role),null,tint=roleColor(user.role), modifier = Modifier.padding(11.dp).size(24.dp))
+                        }
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)){Text(user.name,fontWeight=FontWeight.Bold, style = MaterialTheme.typography.titleMedium);Text(user.role.label,color=Muted, style = MaterialTheme.typography.bodySmall)}
+                        Icon(Icons.Outlined.ArrowForward,null, tint = Navy)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)); Text("Prototype environment · Demo records", color = Muted, style = MaterialTheme.typography.labelSmall) }
         }
-        if(vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top=16.dp))
+        if(vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter), color = Color(0xFF56C9F4))
     }
 }
+
+@Composable private fun BrandMark() { Surface(color=Color.White,shape=RoundedCornerShape(17.dp),modifier=Modifier.size(58.dp)){Box(contentAlignment=Alignment.Center){Text("DI",color=Navy,fontWeight=FontWeight.ExtraBold,style=MaterialTheme.typography.titleLarge)}} }
+private fun roleColor(role: Role) = when(role){Role.TENANT_ADMIN->Color(0xFF7548B8);Role.AUTHORITY->Navy;Role.MAKER->Emerald;Role.CHECKER->Amber;Role.CITIZEN->MapplsBlue}
+private fun roleIcon(role: Role) = when(role){Role.TENANT_ADMIN->Icons.Outlined.AdminPanelSettings;Role.AUTHORITY->Icons.Outlined.AccountBalance;Role.MAKER->Icons.Outlined.Engineering;Role.CHECKER->Icons.Outlined.VerifiedUser;Role.CITIZEN->Icons.Outlined.Campaign}
 
 private enum class Tab { HOME, MODULES, MAP, SEARCH, MORE }
 
@@ -104,8 +167,9 @@ private fun MainShell(vm: AppViewModel, api: ApiClient, logout:()->Unit) {
     var module by remember { mutableStateOf<ModuleSpec?>(null) }
     val user=vm.session!!.user
     Scaffold(
-        topBar={TopAppBar(title={Column{Text(module?.title ?: "IIMM Platform",fontWeight=FontWeight.Bold);Text(user.role.label,style=MaterialTheme.typography.labelSmall,color=Color.Gray)}},navigationIcon={if(module!=null){IconButton(onClick={module=null}){Icon(Icons.Outlined.ArrowBack,"Back")}}})},
-        bottomBar={if(module==null) NavigationBar { listOf(Tab.HOME to Icons.Outlined.Home,Tab.MODULES to Icons.Outlined.Apps,Tab.MAP to Icons.Outlined.Map,Tab.SEARCH to Icons.Outlined.Search,Tab.MORE to Icons.Outlined.MoreHoriz).forEach{(item,icon)->NavigationBarItem(selected=tab==item,onClick={tab=item},icon={Icon(icon,item.name)},label={Text(item.name.lowercase().replaceFirstChar(Char::uppercase))})} }},
+        containerColor = Mist,
+        topBar={TopAppBar(title={Column{Text(module?.title ?: "IIMM Platform",fontWeight=FontWeight.Bold);Text(user.role.label.uppercase(),style=MaterialTheme.typography.labelSmall,color=Color.White.copy(alpha=.72f))}},navigationIcon={if(module!=null){IconButton(onClick={module=null}){Icon(Icons.Outlined.ArrowBack,"Back", tint = Color.White)}}},colors=TopAppBarDefaults.topAppBarColors(containerColor=DeepNavy,titleContentColor=Color.White))},
+        bottomBar={if(module==null) NavigationBar(containerColor=Color.White,tonalElevation=10.dp) { listOf(Tab.HOME to Icons.Outlined.Home,Tab.MODULES to Icons.Outlined.Apps,Tab.MAP to Icons.Outlined.Map,Tab.SEARCH to Icons.Outlined.Search,Tab.MORE to Icons.Outlined.MoreHoriz).forEach{(item,icon)->NavigationBarItem(selected=tab==item,onClick={tab=item},icon={Icon(icon,item.name)},label={Text(item.name.lowercase().replaceFirstChar(Char::uppercase))},colors=NavigationBarItemDefaults.colors(selectedIconColor=Navy,selectedTextColor=Navy,indicatorColor=Sky,unselectedIconColor=Muted,unselectedTextColor=Muted))} }},
     ) { padding -> Box(Modifier.padding(padding).fillMaxSize()) {
         if(module!=null) ModuleScreen(vm,api,module!!)
         else when(tab){Tab.HOME->HomeScreen(vm,api){module=it};Tab.MODULES->ModulesScreen(user.role){module=it};Tab.MAP->FieldMapScreen(vm,api);Tab.SEARCH->SearchScreen(vm,api);Tab.MORE->MoreScreen(vm,api,logout)}
@@ -116,17 +180,28 @@ private fun MainShell(vm: AppViewModel, api: ApiClient, logout:()->Unit) {
 @Composable
 private fun HomeScreen(vm:AppViewModel,api:ApiClient,open:(ModuleSpec)->Unit){
     val scope=rememberCoroutineScope();LaunchedEffect(Unit){vm.dashboard(api)};val data=vm.dashboard
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-        item{Text("Good day, ${vm.session!!.user.name.substringBefore(' ')}",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold);Text(vm.session!!.tenantName ?: "Integrated infrastructure operations",color=Color.Gray)}
-        val kpis=data?.optJSONArray("kpis")?.let(::jsonObjects).orEmpty();items(kpis.chunked(2)){row->Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){row.forEach{item->ElevatedCard(Modifier.weight(1f)){Column(Modifier.padding(16.dp)){Text(item.optString("value"),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold,color=Navy);Text(item.optString("label"),style=MaterialTheme.typography.bodySmall)}}};if(row.size==1)Spacer(Modifier.weight(1f))}}
-        item{Text("Priority work",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)}
-        items(MODULES.filter{vm.session!!.user.role in it.roles}.take(5)){spec->ElevatedCard(onClick={open(spec)},modifier=Modifier.fillMaxWidth()){ListItem(headlineContent={Text(spec.title,fontWeight=FontWeight.SemiBold)},supportingContent={Text(spec.subtitle)},leadingContent={Icon(Icons.Outlined.TaskAlt,null,tint=Navy)},trailingContent={Icon(Icons.Outlined.ChevronRight,null)})}}
+    LazyColumn(Modifier.fillMaxSize().background(Mist),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
+        item{DashboardHero(vm.session!!.user,vm.session!!.tenantName)}
+        val kpis=data?.optJSONArray("kpis")?.let(::jsonObjects).orEmpty();items(kpis.chunked(2)){row->Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){row.forEachIndexed{index,item->ElevatedCard(Modifier.weight(1f),shape=RoundedCornerShape(18.dp),colors=CardDefaults.elevatedCardColors(containerColor=if(index%2==0)Color.White else Sky)){Column(Modifier.padding(17.dp)){Icon(if(index%2==0)Icons.Outlined.QueryStats else Icons.Outlined.TaskAlt,null,tint=if(index%2==0)Navy else Emerald,modifier=Modifier.size(22.dp));Spacer(Modifier.height(8.dp));Text(item.optString("value"),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold,color=Ink);Text(item.optString("label"),style=MaterialTheme.typography.bodySmall,color=Muted)}}};if(row.size==1)Spacer(Modifier.weight(1f))}}
+        item{SectionHeading("Priority work","Your most relevant operational areas")}
+        items(MODULES.filter{vm.session!!.user.role in it.roles}.take(5)){spec->ModuleActionCard(spec,open)}
         item{OutlinedButton(onClick={scope.launch{vm.dashboard(api)}},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.Refresh,null);Spacer(Modifier.width(8.dp));Text("Refresh dashboard")}}
     }
 }
 
+@Composable private fun DashboardHero(user:User,tenantName:String?){
+    Surface(shape=RoundedCornerShape(24.dp),color=Color.Transparent,modifier=Modifier.fillMaxWidth()){
+        Column(Modifier.background(Brush.linearGradient(listOf(DeepNavy,Navy,MapplsBlue))).padding(20.dp)){
+            Row(verticalAlignment=Alignment.CenterVertically){Surface(color=Color.White.copy(alpha=.14f),shape=RoundedCornerShape(50.dp)){Icon(roleIcon(user.role),null,tint=Color.White,modifier=Modifier.padding(10.dp).size(22.dp))};Spacer(Modifier.width(10.dp));Text(user.role.label.uppercase(),color=Color.White.copy(alpha=.8f),style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold)}
+            Spacer(Modifier.height(24.dp));Text("Good day, ${user.name.substringBefore(' ')}",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold,color=Color.White);Spacer(Modifier.height(4.dp));Text(tenantName ?: "Integrated infrastructure operations",color=Color.White.copy(alpha=.78f),style=MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+@Composable private fun SectionHeading(title:String,subtitle:String){Column{Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold,color=Ink);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=Muted)}}
+@Composable private fun ModuleActionCard(spec:ModuleSpec,open:(ModuleSpec)->Unit){ElevatedCard(onClick={open(spec)},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(18.dp),colors=CardDefaults.elevatedCardColors(containerColor=Color.White)){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Surface(color=Sky,shape=RoundedCornerShape(14.dp)){Icon(moduleIcon(spec.key),null,tint=Navy,modifier=Modifier.padding(11.dp).size(24.dp))};Spacer(Modifier.width(14.dp));Column(Modifier.weight(1f)){Text(spec.title,fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleMedium);Text(spec.subtitle,style=MaterialTheme.typography.bodySmall,color=Muted)};Icon(Icons.Outlined.ArrowForward,null,tint=Navy)}}}
+
 @Composable
-private fun ModulesScreen(role:Role,open:(ModuleSpec)->Unit){LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){item{Text("All capabilities",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold);Text("Actions are enforced by role and tenant on the server.",color=Color.Gray)};items(MODULES.filter{role in it.roles}){spec->ElevatedCard(onClick={open(spec)},modifier=Modifier.fillMaxWidth()){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(moduleIcon(spec.key),null,tint=Navy);Spacer(Modifier.width(14.dp));Column(Modifier.weight(1f)){Text(spec.title,fontWeight=FontWeight.Bold);Text(spec.subtitle,style=MaterialTheme.typography.bodySmall,color=Color.Gray)};Icon(Icons.Outlined.ChevronRight,null)}}}}}
+private fun ModulesScreen(role:Role,open:(ModuleSpec)->Unit){LazyColumn(Modifier.fillMaxSize().background(Mist),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){item{Surface(color=Sky,shape=RoundedCornerShape(20.dp),modifier=Modifier.fillMaxWidth()){Column(Modifier.padding(18.dp)){Text("All capabilities",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);Text("Actions are enforced by role and tenant on the server.",color=Muted)}}};items(MODULES.filter{role in it.roles}){spec->ModuleActionCard(spec,open)};item{Spacer(Modifier.height(12.dp))}}}
 
 private fun moduleIcon(key:String)=when(key){"projects"->Icons.Outlined.AccountTree;"assets"->Icons.Outlined.Inventory2;"gis"->Icons.Outlined.Layers;"attendance"->Icons.Outlined.MyLocation;"inspections"->Icons.Outlined.FactCheck;"defects"->Icons.Outlined.Build;"payments"->Icons.Outlined.Payments;"tickets"->Icons.Outlined.SupportAgent;"notifications"->Icons.Outlined.Notifications;"sync"->Icons.Outlined.Sync;else->Icons.Outlined.ListAlt}
 
@@ -550,5 +625,5 @@ private fun SearchScreen(vm:AppViewModel,api:ApiClient){var q by remember{mutabl
 private fun MoreScreen(vm:AppViewModel,api:ApiClient,logout:()->Unit){
     val scope=rememberCoroutineScope();val user=vm.session!!.user;val context=androidx.compose.ui.platform.LocalContext.current;val pendingOffline=remember{OfflineQueue(context).all().size}
     fun export(type:String){scope.launch{vm.action{val data=api.download("/api/reports/$type.csv");val name="iimm-$type-report.csv";if(Build.VERSION.SDK_INT>=29){val values=ContentValues().apply{put(MediaStore.Downloads.DISPLAY_NAME,name);put(MediaStore.Downloads.MIME_TYPE,"text/csv");put(MediaStore.Downloads.RELATIVE_PATH,"Download/IIMM")};val uri=context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values)?:error("Unable to create report file");context.contentResolver.openOutputStream(uri)?.use{it.write(data)}?:error("Unable to write report file")}else{context.getExternalFilesDir(null)?.resolve(name)?.writeBytes(data)};vm.error="$name was saved to Downloads/IIMM."}}}
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){item{ElevatedCard(Modifier.fillMaxWidth()){ListItem(headlineContent={Text(user.name,fontWeight=FontWeight.Bold)},supportingContent={Text("${user.designation} · ${user.role.label}\n${user.email}")},leadingContent={Icon(Icons.Outlined.AccountCircle,null,tint=Navy,modifier=Modifier.size(40.dp))})}};item{ElevatedCard(Modifier.fillMaxWidth()){ListItem(headlineContent={Text("$pendingOffline pending offline changes",fontWeight=FontWeight.Bold)},supportingContent={Text(if(pendingOffline==0)"All captured field work is synced." else "Saved evidence and field changes will retry automatically when connected.")},leadingContent={Icon(Icons.Outlined.Sync,null,tint=Navy)})}};if(user.role in setOf(Role.TENANT_ADMIN,Role.AUTHORITY,Role.CHECKER)){item{Text("CSV reports",fontWeight=FontWeight.Bold)};items(listOf("projects","assets","defects","payments","attendance")){type->OutlinedButton(onClick={export(type)},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.Download,null);Spacer(Modifier.width(8.dp));Text("Export ${type.replaceFirstChar(Char::uppercase)}")}}};item{OutlinedButton(onClick={scope.launch{api.post("/api/notifications/read-all")}},modifier=Modifier.fillMaxWidth()){Text("Mark all notifications read")}};item{OutlinedButton(onClick=logout,modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.outlinedButtonColors(contentColor=Color.Red)){Icon(Icons.Outlined.Logout,null);Spacer(Modifier.width(8.dp));Text("Sign out")}};item{Text("Native build 1.0.0\nAPI ${BuildConfig.API_BASE_URL}\nMappls credentials: ${if(BuildConfig.MAPPLS_CREDENTIALS_PRESENT)"installed" else "required"}",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}}
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){item{ElevatedCard(Modifier.fillMaxWidth()){ListItem(headlineContent={Text(user.name,fontWeight=FontWeight.Bold)},supportingContent={Text("${user.designation} · ${user.role.label}\n${user.email}")},leadingContent={Icon(Icons.Outlined.AccountCircle,null,tint=Navy,modifier=Modifier.size(40.dp))})}};item{ElevatedCard(Modifier.fillMaxWidth()){ListItem(headlineContent={Text("$pendingOffline pending offline changes",fontWeight=FontWeight.Bold)},supportingContent={Text(if(pendingOffline==0)"All captured field work is synced." else "Saved evidence and field changes will retry automatically when connected.")},leadingContent={Icon(Icons.Outlined.Sync,null,tint=Navy)})}};if(user.role in setOf(Role.TENANT_ADMIN,Role.AUTHORITY,Role.CHECKER)){item{Text("CSV reports",fontWeight=FontWeight.Bold)};items(listOf("projects","assets","defects","payments","attendance")){type->OutlinedButton(onClick={export(type)},modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.Download,null);Spacer(Modifier.width(8.dp));Text("Export ${type.replaceFirstChar(Char::uppercase)}")}}};item{OutlinedButton(onClick={scope.launch{api.post("/api/notifications/read-all")}},modifier=Modifier.fillMaxWidth()){Text("Mark all notifications read")}};item{OutlinedButton(onClick=logout,modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.outlinedButtonColors(contentColor=Color.Red)){Icon(Icons.Outlined.Logout,null);Spacer(Modifier.width(8.dp));Text("Sign out")}};item{Text("Native build 1.0.0\nAPI ${BuildConfig.API_BASE_URL}\nMappls SDK: ${when{IimmApplication.mapplsReady->"connected";IimmApplication.mapplsError!=null->"configuration needs attention";else->"credentials required"}}",style=MaterialTheme.typography.bodySmall,color=Color.Gray)}}
 }

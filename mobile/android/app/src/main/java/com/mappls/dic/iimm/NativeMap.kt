@@ -3,17 +3,34 @@ package com.mappls.dic.iimm
 import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
-import android.view.View
-import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mappls.sdk.maps.MapView
 import com.mappls.sdk.maps.MapplsMap
@@ -61,8 +78,22 @@ fun parseMapData(overview: JSONObject): MapData {
 
 @Composable
 fun NativeMap(data: MapData, selected: MapPoint?, onSelect: (MapPoint) -> Unit, modifier: Modifier = Modifier) {
-    if (!BuildConfig.MAPPLS_CREDENTIALS_PRESENT) {
-        Box(modifier) { AndroidView(factory = { context -> TextView(context).apply { text = "Mappls native credentials required\nAdd *.a.conf and *.a.olf to mobile/android/app/.\nOperational coordinates and GIS data remain available."; textSize = 17f; setTextColor(Color.rgb(16,70,133)); setPadding(40,40,40,40); gravity = 17; setBackgroundColor(Color.rgb(235,244,252)) } }, modifier = Modifier.fillMaxSize()) }
+    if (!IimmApplication.mapplsReady) {
+        val message = when {
+            IimmApplication.mapplsError != null -> "Mappls configuration needs attention\nThe supplied package or signing fingerprint does not match this app.\nOperational coordinates and GIS data remain available."
+            else -> "Mappls native credentials required\nAdd *.a.conf and *.a.olf to mobile/android/app/.\nOperational coordinates and GIS data remain available."
+        }
+        Box(modifier.background(Brush.verticalGradient(listOf(ComposeColor(0xFFE8F3FB),ComposeColor(0xFFF6FAFD)))), contentAlignment = Alignment.Center) {
+            Surface(shape=RoundedCornerShape(24.dp),color=ComposeColor.White,shadowElevation=6.dp,modifier=Modifier.fillMaxWidth().padding(22.dp)){
+                Column(Modifier.padding(22.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                    Surface(color=ComposeColor(0xFFFFF3DD),shape=RoundedCornerShape(18.dp)){Icon(if(IimmApplication.mapplsError!=null)Icons.Outlined.WarningAmber else Icons.Outlined.Map,null,tint=ComposeColor(0xFF104685),modifier=Modifier.padding(14.dp).size(30.dp))}
+                    Spacer(Modifier.height(14.dp))
+                    Text(if(IimmApplication.mapplsError!=null)"Map configuration needs attention" else "Map credentials required",fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleLarge,color=ComposeColor(0xFF152238))
+                    Spacer(Modifier.height(7.dp))
+                    Text(message.substringAfter('\n'),style=MaterialTheme.typography.bodyMedium,color=ComposeColor(0xFF607089),modifier=Modifier.fillMaxWidth())
+                }
+            }
+        }
         return
     }
     val mapView = remember { mutableStateOf<MapView?>(null) }

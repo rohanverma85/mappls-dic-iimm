@@ -97,25 +97,23 @@ struct MapDataset {
 }
 
 struct NativeMap: View {
+  @EnvironmentObject var mappls: MapplsSDKState
   let dataset: MapDataset
   @Binding var selected: MapMarker?
-  private var credentials: Bool {
-    Bundle.main.url(forResource: "i", withExtension: "conf") != nil
-      && Bundle.main.url(forResource: "i", withExtension: "olf") != nil
-  }
   var body: some View {
-    if credentials {
+    if mappls.ready {
       MapplsRepresentable(dataset: dataset, selected: $selected)
     } else {
       ZStack {
-        Color.iimmSky
-        VStack(spacing: 12) {
-          Image(systemName: "map.fill").font(.system(size: 44)).foregroundStyle(Color.iimmNavy)
-          Text("Mappls native credentials required").font(.headline)
-          Text(
-            "Add i.conf and i.olf to IIMM/Resources/Mappls/.\nOperational coordinates and GIS data remain available."
-          ).multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal)
+        LinearGradient(colors: [.iimmSky, .iimmMist], startPoint: .top, endPoint: .bottom)
+        VStack(spacing: 13) {
+          IIMMSymbolTile(symbol: mappls.symbol, color: mappls.color)
+          Text(mappls.title).font(.title3.bold()).foregroundStyle(Color.iimmInk)
+          Text(mappls.detail).font(.subheadline).multilineTextAlignment(.center)
+            .foregroundStyle(.secondary).padding(.horizontal)
+          if case .loading = mappls.status { ProgressView().tint(Color.iimmBlue) }
         }
+        .frame(maxWidth: .infinity).iimmCard().padding(22)
       }
     }
   }

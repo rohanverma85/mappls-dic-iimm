@@ -21,32 +21,67 @@ struct LoginView: View {
   @EnvironmentObject var app: AppModel
   var body: some View {
     NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 18) {
-          Text("DI").font(.title.bold()).foregroundStyle(.white).frame(width: 64, height: 64)
-            .background(Color.iimmNavy, in: RoundedRectangle(cornerRadius: 18))
-          Text("IIMM Platform").font(.largeTitle.bold())
-          Text("Native field and governance application").foregroundStyle(.secondary)
-          Text("Choose a demo role").font(.headline).padding(.top)
-          ForEach(app.demoUsers) { user in
-            Button {
-              Task { await app.login(user.id) }
-            } label: {
-              HStack {
-                Image(systemName: "person.crop.circle").font(.title2)
-                VStack(alignment: .leading) {
-                  Text(user.name).bold()
-                  Text(user.role.label).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-              }.padding().background(.background, in: RoundedRectangle(cornerRadius: 16)).shadow(
-                color: .black.opacity(0.08), radius: 8)
-            }.buttonStyle(.plain)
+      ZStack {
+        LinearGradient(colors: [.iimmDeepNavy, .iimmNavy, .iimmMist], startPoint: .top, endPoint: .center)
+          .ignoresSafeArea()
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+              Text("DI").font(.title2.bold()).foregroundStyle(Color.iimmNavy).frame(width: 58, height: 58)
+                .background(.white, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+              VStack(alignment: .leading, spacing: 2) {
+                Text("DIGITAL INDIA").font(.caption.bold()).foregroundStyle(.white.opacity(0.75))
+                Text("IIMM Platform").font(.title2.bold()).foregroundStyle(.white)
+              }
+            }
+            Text("Infrastructure work,\nconnected end to end.").font(.largeTitle.bold())
+              .foregroundStyle(.white).padding(.top, 20)
+            Text("Field operations, governance approvals and citizen service in one secure workspace.")
+              .font(.subheadline).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 30)
+            Text("Choose a demo workspace").font(.title2.bold()).foregroundStyle(Color.iimmInk)
+            Text("Role permissions are enforced by the API.").font(.caption).foregroundStyle(.secondary)
+              .padding(.bottom, 4)
+            ForEach(app.demoUsers) { user in
+              Button {
+                Task { await app.login(user.id) }
+              } label: {
+                HStack(spacing: 13) {
+                  IIMMSymbolTile(symbol: roleIcon(user.role), color: roleColor(user.role))
+                  VStack(alignment: .leading, spacing: 3) {
+                    Text(user.name).font(.headline).foregroundStyle(Color.iimmInk)
+                    Text(user.role.label).font(.caption).foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  Image(systemName: "arrow.right").font(.subheadline.bold()).foregroundStyle(Color.iimmNavy)
+                }.iimmCard()
+              }.buttonStyle(.plain)
+            }
+            Text("Prototype environment · Demo records").font(.caption2).foregroundStyle(.secondary)
+              .padding(.vertical, 12)
           }
-        }.padding(24)
+          .padding(.horizontal, 22).padding(.top, 18)
+        }
       }
     }.task { await app.loadDemos() }
+  }
+
+  private func roleColor(_ role: Role) -> Color {
+    switch role {
+    case .tenantAdmin: Color(red: 117/255, green: 72/255, blue: 184/255)
+    case .authority: .iimmNavy
+    case .maker: .iimmGreen
+    case .checker: .iimmAmber
+    case .citizen: .iimmBlue
+    }
+  }
+  private func roleIcon(_ role: Role) -> String {
+    switch role {
+    case .tenantAdmin: "person.badge.key.fill"
+    case .authority: "building.columns.fill"
+    case .maker: "person.fill.checkmark"
+    case .checker: "checkmark.shield.fill"
+    case .citizen: "megaphone.fill"
+    }
   }
 }
 
@@ -68,23 +103,23 @@ struct HomeView: View {
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 14) {
-        Text(
-          "Good day, \(app.session?.user.name.split(separator:" ").first.map(String.init) ?? "")"
-        ).font(.title.bold())
-        Text(app.session?.tenantName ?? "Integrated infrastructure operations").foregroundStyle(
-          .secondary)
+        IIMMHero(
+          eyebrow: app.session?.user.role.label ?? "IIMM",
+          title: "Good day, \(app.session?.user.name.split(separator:" ").first.map(String.init) ?? "")",
+          subtitle: app.session?.tenantName ?? "Integrated infrastructure operations")
         LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 12) {
           ForEach(Array(kpis.enumerated()), id: \.offset) { _, item in
-            VStack(alignment: .leading) {
-              Text(String(describing: item["value"] ?? "–")).font(.title.bold()).foregroundStyle(
-                Color.iimmNavy)
-              Text(item["label"] as? String ?? "").font(.caption)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(
-              .background, in: RoundedRectangle(cornerRadius: 16)
-            ).shadow(color: .black.opacity(0.06), radius: 7)
+            VStack(alignment: .leading, spacing: 8) {
+              Image(systemName: "chart.line.uptrend.xyaxis").font(.headline).foregroundStyle(Color.iimmNavy)
+              Text(String(describing: item["value"] ?? "–")).font(.title.bold()).foregroundStyle(Color.iimmInk)
+              Text(item["label"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading).iimmCard()
           }
         }
-        Text("Priority work").font(.title2.bold()).padding(.top)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Priority work").font(.title2.bold())
+          Text("Your most relevant operational areas").font(.caption).foregroundStyle(.secondary)
+        }.padding(.top, 4)
         ForEach(
           modules.filter { module in
             app.session.map { module.roles.contains($0.user.role) } ?? false
@@ -93,7 +128,7 @@ struct HomeView: View {
           NavigationLink(value: module) { ModuleRow(module: module) }.buttonStyle(.plain)
         }
       }.padding()
-    }.navigationTitle("IIMM Platform").navigationDestination(for: ModuleSpec.self) {
+    }.background(Color.iimmMist).navigationTitle("IIMM Platform").navigationDestination(for: ModuleSpec.self) {
       ModuleView(module: $0)
     }.refreshable { await app.loadDashboard() }.task { await app.loadDashboard() }
   }
@@ -106,7 +141,15 @@ struct ModulesView: View {
     return modules.filter { $0.roles.contains(role) }
   }
   var body: some View {
-    List(available) { module in NavigationLink(value: module) { ModuleRow(module: module) } }
+    List {
+      Section {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("All capabilities").font(.title2.bold())
+          Text("Actions are enforced by role and tenant on the server.").font(.caption).foregroundStyle(.secondary)
+        }.padding(.vertical, 8)
+      }
+      Section { ForEach(available) { module in NavigationLink(value: module) { ModuleRow(module: module) } } }
+    }.listStyle(.insetGrouped)
       .navigationTitle("All capabilities").navigationDestination(for: ModuleSpec.self) {
         ModuleView(module: $0)
       }
@@ -117,13 +160,13 @@ struct ModuleRow: View {
   let module: ModuleSpec
   var body: some View {
     HStack(spacing: 14) {
-      Image(systemName: icon(module.id)).foregroundStyle(Color.iimmNavy).frame(width: 28)
+      IIMMSymbolTile(symbol: icon(module.id))
       VStack(alignment: .leading, spacing: 3) {
         Text(module.title).bold()
         Text(module.subtitle).font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
-    }.padding(.vertical, 6)
+    }.padding(.vertical, 5)
   }
   func icon(_ key: String) -> String {
     switch key {

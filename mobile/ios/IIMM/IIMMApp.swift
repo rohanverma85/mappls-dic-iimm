@@ -1,24 +1,24 @@
 import MapplsMap
 import SwiftUI
+import UIKit
 
 @main
 struct IIMMApp: App {
   @StateObject private var app = AppModel()
+  @StateObject private var mappls = MapplsSDKState()
 
   init() {
-    if Bundle.main.url(forResource: "i", withExtension: "conf") != nil,
-      Bundle.main.url(forResource: "i", withExtension: "olf") != nil
-    {
-      MapplsMapAuthenticator.sharedManager().initializeSDKSession { _, _ in }
-    }
+    let appearance = UITabBarAppearance()
+    appearance.configureWithOpaqueBackground()
+    appearance.backgroundColor = UIColor.systemBackground
+    UITabBar.appearance().standardAppearance = appearance
+    UITabBar.appearance().scrollEdgeAppearance = appearance
   }
 
   var body: some Scene {
-    WindowGroup { RootView().environmentObject(app).tint(Color.iimmNavy) }
+    WindowGroup {
+      RootView().environmentObject(app).environmentObject(mappls).tint(Color.iimmNavy)
+        .preferredColorScheme(.light)
+    }
   }
-}
-
-extension Color {
-  static let iimmNavy = Color(red: 16 / 255, green: 70 / 255, blue: 133 / 255)
-  static let iimmSky = Color(red: 234 / 255, green: 243 / 255, blue: 251 / 255)
 }
