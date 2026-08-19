@@ -27,13 +27,16 @@ interface Props {
 type MapplsMapInstance = {
   on?:(event:string,callback:(event?:unknown)=>void)=>void;
   addListener?:(event:string,callback:(event?:unknown)=>void)=>unknown;
+  setCenter?:(position:{lat:number;lng:number}|[number,number])=>void;
   remove?:()=>void;
 };
+
+type MapplsMarkerInstance = { setPosition?:(position:{lat:number;lng:number})=>void; remove?:()=>void };
 
 type MapplsGlobal = {
   Map: new (id:string, options:Record<string,unknown>) => MapplsMapInstance;
   addGeoJson?: new (options:Record<string,unknown>) => unknown;
-  Marker?: new (options:Record<string,unknown>) => unknown;
+  Marker?: new (options:Record<string,unknown>) => MapplsMarkerInstance;
   Circle?: new (options:Record<string,unknown>) => unknown;
 };
 
@@ -83,12 +86,17 @@ function pointFromMapEvent(event:unknown):{lat:number;lng:number}|null {
 
 export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],focus=null,selectedLocation=null,selectable=false,onLocationSelect,compact=false,className=''}:Props) {
   const id = useRef(`mappls-${Math.random().toString(36).slice(2)}`);
-  const mapRef = useRef<{remove?:()=>void}|null>(null);
+  const mapRef = useRef<MapplsMapInstance|null>(null);
+  const selectedMarkerRef=useRef<MapplsMarkerInstance|null>(null);
+  const onSelectRef=useRef(onLocationSelect);
   const [config,setConfig] = useState<MapplsConfig|null>(null);
   const [state,setState] = useState<'loading'|'live'|'fallback'|'error'>('loading');
-  const center = selectedLocation ?? focus ?? projects[0]?.center ?? (defects[0] ? {lat:defects[0].lat,lng:defects[0].lng} : {lat:28.6139,lng:77.2090});
+  const center = focus ?? projects[0]?.center ?? (defects[0] ? {lat:defects[0].lat,lng:defects[0].lng} : {lat:28.6139,lng:77.2090});
+  const layerSignature=JSON.stringify(layers),assetSignature=JSON.stringify(assets),defectSignature=JSON.stringify(defects),projectSignature=JSON.stringify(projects);
 
   useEffect(()=>{ api<MapplsConfig>('/api/mappls/config').then(setConfig).catch(()=>setState('fallback')); },[]);
+  useEffect(()=>{onSelectRef.current=onLocationSelect;},[onLocationSelect]);
+  useEffect(()=>{const target=selectedLocation??focus;if(target&&mapRef.current?.setCenter){try{mapRef.current.setCenter([target.lat,target.lng]);}catch{/* map remains interactive at its current viewport */}}},[selectedLocation?.lat,selectedLocation?.lng,focus?.lat,focus?.lng]);
   useEffect(()=>{
     if (!config) return;
     if (!config.configured || !config.accessToken) { setState('fallback'); return; }
@@ -106,16 +114,15 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
         });
         defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
         projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
-        if(selectedLocation&&sdk.Marker)new sdk.Marker({map,position:selectedLocation,fitbounds:false,draggable:false,popupHtml:'<strong>Selected location</strong>'});
       };
       if(map.on)map.on('load',draw);else draw();
-      if(selectable&&onLocationSelect){
-        const select=(event?:unknown)=>{const point=pointFromMapEvent(event);if(point)onLocationSelect(point);};
+      if(selectable){
+        const select=(event?:unknown)=>{const point=pointFromMapEvent(event);if(!point)return;if(selectedMarkerRef.current?.setPosition)selectedMarkerRef.current.setPosition(point);else if(sdk.Marker)selectedMarkerRef.current=new sdk.Marker({map,position:point,fitbounds:false,popupHtml:'<strong>Selected location</strong>'});onSelectRef.current?.(point);};
         if(map.addListener)map.addListener('click',select);else map.on?.('click',select);
       }
     }).catch(()=>setState('error'));
-    return()=>{disposed=true;mapRef.current?.remove?.();mapRef.current=null;};
-  },[config,compact,center.lat,center.lng,layers,assets,defects,projects,selectable,onLocationSelect,selectedLocation?.lat,selectedLocation?.lng]);
+    return()=>{disposed=true;selectedMarkerRef.current?.remove?.();selectedMarkerRef.current=null;mapRef.current?.remove?.();mapRef.current=null;};
+  },[config,compact,layerSignature,assetSignature,defectSignature,projectSignature,selectable]);
 
   return <div className={`mappls-shell ${compact?'compact':''} ${className}`}>
     {state!=='fallback'&&<div id={id.current} className="mappls-canvas"/>}
