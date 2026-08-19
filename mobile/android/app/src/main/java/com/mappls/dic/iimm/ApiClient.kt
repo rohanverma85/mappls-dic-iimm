@@ -109,6 +109,30 @@ class ApiClient(private val sessions: SessionStore) {
         } finally { connection.disconnect() }
     }
 
+    suspend fun parseGisFile(bytes: ByteArray, fileName: String): JSONObject = withContext(Dispatchers.IO) {
+        val connection = URL("$base/api/gis/parse-file").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "application/octet-stream")
+            connection.setRequestProperty("X-File-Name", fileName)
+            sessions.token()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            connection.outputStream.use { it.write(bytes) }
+            val status = connection.responseCode
+            val text = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw ApiException(
+                status,
+                runCatching { JSONObject(text).optString("error") }.getOrNull().orEmpty()
+                    .ifBlank { "GIS file parsing failed ($status)" },
+            )
+            JSONObject(text)
+        } finally { connection.disconnect() }
+    }
+
     private suspend fun request(method: String, path: String, body: JSONObject? = null): Any = withContext(Dispatchers.IO) {
         val connection = URL("$base$path").openConnection() as HttpURLConnection
         try {

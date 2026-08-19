@@ -102,6 +102,24 @@ final class APIClient {
     return object
   }
 
+  func parseGisFile(data: Data, fileName: String) async throws -> [String: Any] {
+    var request = URLRequest(url: URL(string: "/api/gis/parse-file", relativeTo: Self.base)!)
+    request.httpMethod = "POST"
+    request.timeoutInterval = 60
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    request.setValue(fileName, forHTTPHeaderField: "X-File-Name")
+    if let token = keys.token() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+    request.httpBody = data
+    let (responseData, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else { throw APIError.server("No server response") }
+    let value = try JSONSerialization.jsonObject(with: responseData)
+    guard (200..<300).contains(http.statusCode), let object = value as? [String: Any] else {
+      throw APIError.server((value as? [String: Any])?["error"] as? String ?? "GIS file parsing failed (\(http.statusCode))")
+    }
+    return object
+  }
+
   private func request(path: String, method: String, body: [String: Any]? = nil) async throws -> Any
   {
     var request = URLRequest(url: URL(string: path, relativeTo: Self.base)!)

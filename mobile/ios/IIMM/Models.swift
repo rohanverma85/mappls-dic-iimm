@@ -68,8 +68,8 @@ let modules: [ModuleSpec] = [
     id: "gis", title: "GIS layers", subtitle: "Mappls map, networks and imported versions",
     endpoint: "/api/gis/layers", roles: [.authority, .maker, .checker], createKind: nil),
   .init(
-    id: "gis_imports", title: "GIS import history", subtitle: "Published network versions and rollback",
-    endpoint: "/api/gis/imports", roles: [.authority, .maker, .checker], createKind: nil),
+    id: "gis_imports", title: "GIS import history", subtitle: "Publish KML, KMZ and zipped Shapefile network versions",
+    endpoint: "/api/gis/imports", roles: [.authority, .maker, .checker], createKind: "gis_import"),
   .init(
     id: "attendance", title: "Attendance", subtitle: "Server-verified project geofence",
     endpoint: "/api/attendance", roles: [.authority, .maker, .checker], createKind: "attendance"),

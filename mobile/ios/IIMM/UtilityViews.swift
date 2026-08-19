@@ -75,9 +75,14 @@ struct SearchView: View {
   var body: some View {
     List {
       ForEach(Array(app.search.enumerated()), id: \.offset) { _, record in
-        VStack(alignment: .leading) {
-          Text(title(record)).bold()
-          Text(subtitle(record)).font(.caption).foregroundStyle(.secondary)
+        NavigationLink {
+          SearchRecordView(result: record)
+        } label: {
+          VStack(alignment: .leading) {
+            Text(record["type"] as? String ?? "Record").font(.caption).foregroundStyle(.tint)
+            Text(title(record)).bold()
+            Text(subtitle(record)).font(.caption).foregroundStyle(.secondary)
+          }
         }
       }
     }.navigationTitle("Search").searchable(text: $query, prompt: "All IIMM records").onChange(
@@ -88,6 +93,36 @@ struct SearchView: View {
         if query == value { await app.find(value) }
       }
     }
+  }
+}
+
+private struct SearchRecordView: View {
+  let result: [String: Any]
+  private var record: [String: Any] { result["record"] as? [String: Any] ?? result }
+  private var rows: [(String, String)] { flatten(record).filter { $0.0 != "tenantId" && !$0.0.hasPrefix("featureCollection") }.prefix(100).map { $0 } }
+
+  var body: some View {
+    List {
+      Section(result["type"] as? String ?? "IIMM record") {
+        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+          VStack(alignment: .leading, spacing: 3) {
+            Text(row.0.isEmpty ? "Value" : row.0).font(.caption).foregroundStyle(.secondary)
+            Text(row.1)
+          }
+        }
+      }
+    }.navigationTitle(result["title"] as? String ?? "Search result").navigationBarTitleDisplayMode(.inline)
+  }
+
+  private func flatten(_ value: Any, prefix: String = "") -> [(String, String)] {
+    if let object = value as? [String: Any] {
+      return object.keys.sorted().flatMap { flatten(object[$0] as Any, prefix: prefix.isEmpty ? $0 : "\(prefix) · \($0)") }
+    }
+    if let array = value as? [Any] {
+      return array.isEmpty ? [(prefix, "None")] : array.enumerated().flatMap { flatten($0.element, prefix: "\(prefix) \($0.offset + 1)") }
+    }
+    if value is NSNull { return [(prefix, "Not set")] }
+    return [(prefix, String(describing: value))]
   }
 }
 

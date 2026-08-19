@@ -151,6 +151,7 @@ struct ModuleView: View {
     switch module.id {
     case "tenants": return role == .tenantAdmin
     case "users", "projects", "assets": return role == .tenantAdmin || role == .authority
+    case "gis_imports": return role == .authority
     case "attendance", "payments": return role == .maker
     case "inspections": return role == .authority || role == .maker || role == .checker
     case "defects", "tickets": return true
@@ -179,7 +180,10 @@ struct ModuleView: View {
           Image(systemName: "plus")
         }
       }
-    }.sheet(isPresented: $creating) { CreateView(module: module, isPresented: $creating) }.task {
+    }.sheet(isPresented: $creating) {
+      if module.id == "gis_imports" { GisImportView(isPresented: $creating) }
+      else { CreateView(module: module, isPresented: $creating) }
+    }.task {
       await app.load(module)
     }.refreshable { await app.load(module) }
   }
@@ -192,6 +196,12 @@ struct RecordView: View {
   @State private var showingATR = false
   @State private var showingInspection = false
   @State private var showingTicket = false
+  @State private var showingDetail = false
+  @State private var showingManage = false
+  @State private var showingValidation = false
+  @State private var showingFeedback = false
+  @State private var showingReview = false
+  @State private var reviewKind = ""
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
       Text(title(record)).bold()
@@ -203,6 +213,10 @@ struct RecordView: View {
             if action.path == "local:atr" { showingATR = true }
             else if action.path == "local:inspection" { showingInspection = true }
             else if action.path == "local:ticket" { showingTicket = true }
+            else if action.path == "local:manage" { showingManage = true }
+            else if action.path == "local:defect-validation" { showingValidation = true }
+            else if action.path == "local:feedback" { showingFeedback = true }
+            else if ["local:payment-review","local:atr-review"].contains(action.path) { reviewKind=action.path;showingReview=true }
             else { Task {
               await app.mutate {
                 do {
@@ -221,6 +235,7 @@ struct RecordView: View {
             } }
           }.buttonStyle(.bordered)
         }
+        Button("Details") { showingDetail = true }.buttonStyle(.bordered)
       }
     }.padding(.vertical, 5).sheet(isPresented: $showingATR) {
       ATRView(defectId: record["id"] as? String ?? "", isPresented: $showingATR)
@@ -228,6 +243,16 @@ struct RecordView: View {
       InspectionDetailView(record: record, isPresented: $showingInspection)
     }.sheet(isPresented: $showingTicket) {
       TicketDetailView(record: record, isPresented: $showingTicket)
+    }.sheet(isPresented: $showingDetail) {
+      NativeRecordDetailView(record: record, module: module, isPresented: $showingDetail)
+    }.sheet(isPresented: $showingManage) {
+      ManageRecordView(record: record, module: module, isPresented: $showingManage)
+    }.sheet(isPresented: $showingValidation) {
+      DefectValidationView(record: record, module: module, isPresented: $showingValidation)
+    }.sheet(isPresented: $showingFeedback) {
+      CitizenFeedbackView(record: record, module: module, isPresented: $showingFeedback)
+    }.sheet(isPresented: $showingReview) {
+      DecisionReviewView(record: record, module: module, kind: reviewKind, isPresented: $showingReview)
     }
   }
   struct Action {
@@ -241,14 +266,7 @@ struct RecordView: View {
       return [.init(label: "Mark read", path: "/api/notifications/\(id)/read", body: [:])]
     }
     if module.id == "defects", role == .checker, record["checkerValidation"] as? String == "Pending" {
-      return [
-        .init(
-          label: "Validate", path: "/api/defects/\(id)/validate",
-          body: ["decision": "approve"]),
-        .init(
-          label: "Reject", path: "/api/defects/\(id)/validate",
-          body: ["decision": "reject"]),
-      ]
+      return [.init(label: "Review & assign", path: "local:defect-validation", body: [:])]
     }
     if module.id == "defects", role == .maker, ["Assigned", "Reopened"].contains(status) {
       return [.init(label: "Start work", path: "/api/defects/\(id)/start", body: ["status": "In Progress"])]
@@ -257,63 +275,39 @@ struct RecordView: View {
       return [.init(label: "Submit ATR", path: "local:atr", body: [:])]
     }
     if module.id == "defects", role == .checker, status == "ATR Submitted" {
-      return [
-        .init(
-          label: "Verify ATR", path: "/api/defects/\(id)/verify-atr",
-          body: ["decision": "verify", "note": "Verified in native app"]),
-        .init(
-          label: "Rework", path: "/api/defects/\(id)/verify-atr",
-          body: ["decision": "rework", "note": "Further work required"]),
-      ]
+      return [.init(label: "Review ATR", path: "local:atr-review", body: [:])]
     }
     if module.id == "defects", role == .citizen, ["Resolved", "Closed"].contains(status) {
-      return [
-        .init(label: "Close · 5 stars", path: "/api/defects/\(id)/feedback", body: ["rating": 5, "comment": "Resolved satisfactorily in the native app", "reopen": false]),
-        .init(label: "Reopen", path: "/api/defects/\(id)/feedback", body: ["rating": 2, "comment": "The issue still requires attention", "reopen": true]),
-      ]
+      return [.init(label: "Rate resolution", path: "local:feedback", body: [:])]
     }
     if module.id == "inspections" { return [.init(label: "Open checklist", path: "local:inspection", body: [:])] }
     if module.id == "tickets" { return [.init(label: "View & respond", path: "local:ticket", body: [:])] }
     if module.id == "tenants", role == .tenantAdmin {
       let live = status == "Live"
-      return [.init(label: live ? "Deactivate" : "Set live", path: "/api/tenants/\(id)", body: ["status": live ? "Inactive" : "Live"])]
+      return [.init(label: live ? "Deactivate" : "Set live", path: "/api/tenants/\(id)", body: ["status": live ? "Inactive" : "Live"]), .init(label: "Configure", path: "local:manage", body: [:])]
     }
     if module.id == "users", role == .tenantAdmin || role == .authority,
       !["tenant_admin", "citizen"].contains(record["role"] as? String ?? "")
     {
       let active = record["active"] as? Bool ?? true
-      return [.init(label: active ? "Deactivate" : "Activate", path: "/api/users/\(id)", body: ["active": !active])]
+      return [.init(label: active ? "Deactivate" : "Activate", path: "/api/users/\(id)", body: ["active": !active]), .init(label: "Edit access", path: "local:manage", body: [:])]
     }
     if module.id == "projects", role == .authority {
       let next = min((record["progress"] as? Int ?? 0) + 10, 100)
-      return [.init(label: next == 100 ? "Complete" : "Advance to \(next)%", path: "/api/projects/\(id)", body: ["progress": next, "status": next == 100 ? "Completed" : "Active"])]
+      return [.init(label: next == 100 ? "Complete" : "Advance to \(next)%", path: "/api/projects/\(id)", body: ["progress": next, "status": next == 100 ? "Completed" : "Active"]), .init(label: "Manage", path: "local:manage", body: [:])]
     }
     if module.id == "assets", role == .authority {
       let attention = record["condition"] as? String == "Attention"
-      return [.init(label: attention ? "Mark good" : "Needs attention", path: "/api/assets/\(id)", body: ["condition": attention ? "Good" : "Attention"])]
+      return [.init(label: attention ? "Mark good" : "Needs attention", path: "/api/assets/\(id)", body: ["condition": attention ? "Good" : "Attention"]), .init(label: "Manage", path: "local:manage", body: [:])]
     }
     if module.id == "gis_imports", role == .authority, status == "Published" {
       return [.init(label: "Rollback import", path: "/api/gis/imports/\(id)/rollback", body: [:])]
     }
     if module.id == "payments", role == .checker, status == "Submitted" {
-      return [
-        .init(
-          label: "Verify", path: "/api/payments/\(id)/action",
-          body: ["decision": "approve", "note": "Verified in native app"]),
-        .init(
-          label: "Reject", path: "/api/payments/\(id)/action",
-          body: ["decision": "reject", "note": "Rejected in native app"]),
-      ]
+      return [.init(label: "Review claim", path: "local:payment-review", body: [:])]
     }
     if module.id == "payments", role == .authority, status == "Checker Verified" {
-      return [
-        .init(
-          label: "Approve", path: "/api/payments/\(id)/action",
-          body: ["decision": "approve", "note": "Approved in native app"]),
-        .init(
-          label: "Reject", path: "/api/payments/\(id)/action",
-          body: ["decision": "reject", "note": "Rejected in native app"]),
-      ]
+      return [.init(label: "Authorise claim", path: "local:payment-review", body: [:])]
     }
     if module.id == "sync", role == .checker || role == .authority {
       return [
@@ -326,6 +320,238 @@ struct RecordView: View {
       ]
     }
     return []
+  }
+}
+
+struct NativeRecordDetailView: View {
+  let record: [String: Any]
+  let module: ModuleSpec
+  @Binding var isPresented: Bool
+  var rows: [(String, String)] { flatten(record).filter { $0.0 != "tenantId" && !$0.0.hasPrefix("featureCollection") }.prefix(100).map { $0 } }
+  var body: some View {
+    NavigationStack {
+      List {
+        Section("\(module.title) record") {
+          ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            VStack(alignment: .leading, spacing: 3) {
+              Text(row.0.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption).foregroundStyle(.secondary)
+              Text(row.1).textSelection(.enabled)
+            }.padding(.vertical, 3)
+          }
+        }
+      }.navigationTitle(title(record)).toolbar { Button("Done") { isPresented = false } }
+    }
+  }
+  private func flatten(_ value: Any, prefix: String = "") -> [(String, String)] {
+    if let object = value as? [String: Any] {
+      return object.keys.sorted().flatMap { flatten(object[$0] as Any, prefix: prefix.isEmpty ? $0 : "\(prefix) · \($0)") }
+    }
+    if let array = value as? [Any] {
+      if array.isEmpty { return [(prefix, "None")] }
+      return array.enumerated().flatMap { flatten($0.element, prefix: "\(prefix) \($0.offset + 1)") }
+    }
+    if value is NSNull { return [(prefix, "Not set")] }
+    return [(prefix, String(describing: value))]
+  }
+}
+
+struct DefectValidationView: View {
+  @EnvironmentObject var app: AppModel
+  let record: [String:Any];let module:ModuleSpec;@Binding var isPresented:Bool
+  @State private var approve=true;@State private var users:[[String:Any]]=[];@State private var projects:[[String:Any]]=[];@State private var makerId="";@State private var projectId=""
+  var body:some View{NavigationStack{Form{Picker("Decision",selection:$approve){Text("Approve and assign").tag(true);Text("Reject report").tag(false)}.pickerStyle(.segmented);if approve{Picker("Assigned Maker",selection:$makerId){ForEach(Array(users.enumerated()),id:\.offset){_,user in Text(user["name"] as? String ?? "Maker").tag(user["id"] as? String ?? "")}};Picker("Project",selection:$projectId){ForEach(Array(projects.enumerated()),id:\.offset){_,project in Text("\(project["code"] as? String ?? "") · \(project["name"] as? String ?? "")").tag(project["id"] as? String ?? "")}}};Text("Approval links the report to the chosen project and Maker. Rejection closes it as invalid.").font(.caption).foregroundStyle(.secondary)}.navigationTitle("Validate citizen issue").toolbar{ToolbarItem(placement:.cancellationAction){Button("Cancel"){isPresented=false}};ToolbarItem(placement:.confirmationAction){Button("Submit"){Task{await submit()}}.disabled(approve&&(makerId.isEmpty||projectId.isEmpty))}}}.task{await app.mutate{let all=try await app.api.get("/api/users") as? [[String:Any]] ?? [];users=all.filter{$0["role"] as? String=="maker"&&($0["active"] as? Bool != false)};projects=try await app.api.get("/api/projects") as? [[String:Any]] ?? [];makerId=users.first?["id"] as? String ?? "";projectId=projects.first?["id"] as? String ?? ""}}}
+  func submit()async{await app.mutate{var body:[String:Any]=["decision":approve ? "approve":"reject"];if approve{body["makerId"]=makerId;body["projectId"]=projectId};_ = try await app.api.post("/api/defects/\(record["id"] as? String ?? "")/validate",body:body);await app.load(module);isPresented=false}}
+}
+
+struct CitizenFeedbackView:View{
+  @EnvironmentObject var app:AppModel;let record:[String:Any];let module:ModuleSpec;@Binding var isPresented:Bool;@State private var rating=5.0;@State private var comment="";@State private var reopen=false
+  var body:some View{NavigationStack{Form{Section("Resolution rating"){Text("\(Int(rating)) out of 5 stars").bold();Slider(value:$rating,in:1...5,step:1);TextField("Comments",text:$comment,axis:.vertical).lineLimit(3...8);Toggle("Reopen because work is incomplete",isOn:$reopen)}}.navigationTitle("Rate issue resolution").toolbar{ToolbarItem(placement:.cancellationAction){Button("Cancel"){isPresented=false}};ToolbarItem(placement:.confirmationAction){Button(reopen ? "Submit & reopen":"Close report"){Task{await submit()}}}}}}
+  func submit()async{await app.mutate{_ = try await app.api.post("/api/defects/\(record["id"] as? String ?? "")/feedback",body:["rating":Int(rating),"comment":comment,"reopen":reopen]);await app.load(module);isPresented=false}}
+}
+
+struct DecisionReviewView:View{
+  @EnvironmentObject var app:AppModel;let record:[String:Any];let module:ModuleSpec;let kind:String;@Binding var isPresented:Bool;@State private var approve=true;@State private var note=""
+  var body:some View{NavigationStack{Form{Picker("Decision",selection:$approve){Text("Approve / verify").tag(true);Text("Reject / rework").tag(false)}.pickerStyle(.segmented);TextField("Auditable review note",text:$note,axis:.vertical).lineLimit(3...8);Text("The decision and note are stored on the approval record and activity log.").font(.caption).foregroundStyle(.secondary)}.navigationTitle(kind=="local:atr-review" ? "Review ATR":"Review payment claim").toolbar{ToolbarItem(placement:.cancellationAction){Button("Cancel"){isPresented=false}};ToolbarItem(placement:.confirmationAction){Button("Submit review"){Task{await submit()}}.disabled(note.trimmingCharacters(in:.whitespacesAndNewlines).count<3)}}}}
+  func submit()async{await app.mutate{let atr=kind=="local:atr-review";let path=atr ? "/api/defects/\(record["id"] as? String ?? "")/verify-atr":"/api/payments/\(record["id"] as? String ?? "")/action";_ = try await app.api.post(path,body:["decision":atr ? (approve ? "verify":"rework"):(approve ? "approve":"reject"),"note":note]);await app.load(module);isPresented=false}}
+}
+
+struct ManageRecordView: View {
+  @EnvironmentObject var app: AppModel
+  let record: [String: Any]
+  let module: ModuleSpec
+  @Binding var isPresented: Bool
+  @State private var name: String
+  @State private var location: String
+  @State private var status: String
+  @State private var condition: String
+  @State private var role: String
+  @State private var designation: String
+  @State private var active: Bool
+  @State private var progress: String
+  @State private var radius: String
+  @State private var hierarchy: String
+  @State private var modulesText: String
+  @State private var makers: String
+  @State private var checkers: String
+  @State private var slas: String
+  @State private var assetTypesText: String
+  @State private var milestones: String
+  @State private var documents: String
+  @State private var attributes: String
+  @State private var mapSelection: MapMarker?
+  init(record: [String: Any], module: ModuleSpec, isPresented: Binding<Bool>) {
+    self.record=record;self.module=module;_isPresented=isPresented
+    _name=State(initialValue:record["name"] as? String ?? "");_location=State(initialValue:record["location"] as? String ?? "");_status=State(initialValue:record["status"] as? String ?? "");_condition=State(initialValue:record["condition"] as? String ?? "Good");_role=State(initialValue:record["role"] as? String ?? "maker");_designation=State(initialValue:record["designation"] as? String ?? "");_active=State(initialValue:record["active"] as? Bool ?? true);_progress=State(initialValue:String(record["progress"] as? Int ?? 0));_radius=State(initialValue:String(record["geofenceRadiusMeters"] as? Int ?? 250));_hierarchy=State(initialValue:record["hierarchy"] as? String ?? "");_modulesText=State(initialValue:(record["modules"] as? [String] ?? []).joined(separator:", "));_makers=State(initialValue:(record["makerIds"] as? [String] ?? []).joined(separator:", "));_checkers=State(initialValue:(record["checkerIds"] as? [String] ?? []).joined(separator:", "))
+    let sla=record["slas"] as? [String:Any] ?? [:];_slas=State(initialValue:"\(sla["Critical"] as? Int ?? 24),\(sla["High"] as? Int ?? 72),\(sla["Medium"] as? Int ?? 168),\(sla["Low"] as? Int ?? 360)");_assetTypesText=State(initialValue:(record["assetTypes"] as? [[String:Any]] ?? []).map{item in "\(item["name"] as? String ?? "") | \((item["attributes"] as? [String] ?? []).joined(separator:", ")) | \((item["checklist"] as? [String] ?? []).joined(separator:", "))"}.joined(separator:"\n"))
+    _milestones=State(initialValue:(record["milestones"] as? [[String:Any]] ?? []).map{"\(($0["done"] as? Bool)==true ? "✓":"○") \($0["name"] as? String ?? "") | \($0["due"] as? String ?? "")"}.joined(separator:"\n"));_documents=State(initialValue:(record["documents"] as? [[String:Any]] ?? []).compactMap{$0["name"] as? String}.joined(separator:"\n"));_attributes=State(initialValue:(record["attributes"] as? [String:Any] ?? [:]).keys.sorted().map{"\($0)=\((record["attributes"] as? [String:Any])?[$0] as? String ?? "")"}.joined(separator:"\n"));let center=(record["center"] as? [String:Any]).flatMap{c->MapMarker? in guard let lat=c["lat"] as? Double,let lng=c["lng"] as? Double else{return nil};return .init(lat:lat,lng:lng,title:"Project centre",kind:"Selection")};let point=(record["geometry"] as? [String:Any]).flatMap{g->MapMarker? in guard g["type"] as? String=="Point",let c=g["coordinates"] as? [Double],c.count>1 else{return nil};return .init(lat:c[1],lng:c[0],title:"Asset location",kind:"Selection")};_mapSelection=State(initialValue:module.id=="projects" ? center:point)
+  }
+  var body: some View {
+    NavigationStack {
+      Form {
+        if ["tenants","projects","assets"].contains(module.id) { TextField("Name",text:$name) }
+        if module.id == "tenants" {
+          Picker("Status",selection:$status){ForEach(["Live","Provisioning","Requested","Inactive"],id:\.self){Text($0).tag($0)}}
+          TextField("Hierarchy",text:$hierarchy);TextField("Modules · comma separated",text:$modulesText,axis:.vertical);TextField("Asset types · Name | attrs | checklist",text:$assetTypesText,axis:.vertical).lineLimit(5...12);TextField("SLA hours · Critical, High, Medium, Low",text:$slas)
+        }
+        if module.id == "users" {
+          Picker("Role",selection:$role){Text("Authority").tag("authority");Text("Maker").tag("maker");Text("Checker").tag("checker")};TextField("Designation",text:$designation);Toggle("Active access",isOn:$active)
+        }
+        if module.id == "projects" {
+          NativeMap(dataset:MapDataset(),selected:$mapSelection).frame(height:230).clipShape(RoundedRectangle(cornerRadius:14));TextField("Location",text:$location);Picker("Status",selection:$status){ForEach(["Active","Pending","In Review","Overdue","Completed"],id:\.self){Text($0).tag($0)}};TextField("Progress · 0–100",text:$progress).keyboardType(.numberPad);TextField("Geofence radius · metres",text:$radius).keyboardType(.numberPad);TextField("Maker IDs · comma separated",text:$makers);TextField("Checker IDs · comma separated",text:$checkers);TextField("Milestones · ✓/○ name | due",text:$milestones,axis:.vertical).lineLimit(4...10);TextField("Project documents · one name per line",text:$documents,axis:.vertical).lineLimit(4...10)
+        }
+        if module.id == "assets" {
+          NativeMap(dataset:MapDataset(),selected:$mapSelection).frame(height:230).clipShape(RoundedRectangle(cornerRadius:14));Picker("Condition",selection:$condition){ForEach(["Good","Fair","Attention","Critical"],id:\.self){Text($0).tag($0)}};TextField("Location",text:$location);TextField("Attributes · one key=value per line",text:$attributes,axis:.vertical).lineLimit(5...12)
+        }
+      }.navigationTitle("Manage \(title(record))").toolbar { ToolbarItem(placement:.cancellationAction){Button("Cancel"){isPresented=false}};ToolbarItem(placement:.confirmationAction){Button("Save"){Task{await save()}}} }
+    }
+  }
+  func csv(_ value:String)->[String]{value.split(separator:",").map{$0.trimmingCharacters(in:.whitespaces)}.filter{!$0.isEmpty}}
+  func payload()->[String:Any]{
+    switch module.id {
+    case "tenants":
+      let h=csv(slas).compactMap(Int.init);let existing=record["assetTypes"] as? [[String:Any]] ?? [];let types=assetTypesText.split(separator:"\n").enumerated().compactMap{index,line->[String:Any]? in let p=line.split(separator:"|",maxSplits:2).map{String($0).trimmingCharacters(in:.whitespaces)};guard let name=p.first,!name.isEmpty else{return nil};return ["id":existing.indices.contains(index) ? existing[index]["id"] as? String ?? "at-native-\(UUID().uuidString)":"at-native-\(UUID().uuidString)","name":name,"attributes":p.count>1 ? csv(p[1]):[],"checklist":p.count>2 ? csv(p[2]):[]]};return ["name":name,"hierarchy":hierarchy,"modules":csv(modulesText),"assetTypes":types,"status":status,"slas":["Critical":h.count>0 ? h[0]:24,"High":h.count>1 ? h[1]:72,"Medium":h.count>2 ? h[2]:168,"Low":h.count>3 ? h[3]:360]]
+    case "users": return ["role":role,"designation":designation,"active":active]
+    case "projects":
+      let existing=record["documents"] as? [[String:Any]] ?? [];let docs=documents.split(separator:"\n").enumerated().map{index,line in ["id":existing.indices.contains(index) ? existing[index]["id"] as? String ?? "doc-\(UUID().uuidString)":"doc-\(UUID().uuidString)","name":String(line).trimmingCharacters(in:.whitespaces),"category":existing.indices.contains(index) ? existing[index]["category"] as? String ?? "Project document":"Project document","uploadedAt":existing.indices.contains(index) ? existing[index]["uploadedAt"] as? String ?? ISO8601DateFormatter().string(from:Date()):ISO8601DateFormatter().string(from:Date())]}
+      let marks=milestones.split(separator:"\n").map{line->[String:Any] in let raw=String(line);let parts=raw.trimmingCharacters(in:CharacterSet(charactersIn:"✓○ ")).split(separator:"|",maxSplits:1).map{String($0).trimmingCharacters(in:.whitespaces)};return ["name":parts.first ?? "Milestone","due":parts.count>1 ? parts[1]:"TBD","done":raw.trimmingCharacters(in:.whitespaces).hasPrefix("✓")]}
+      var value:[String:Any]=["name":name,"location":location,"status":status,"progress":Int(progress) ?? 0,"geofenceRadiusMeters":Int(radius) ?? 250,"makerIds":csv(makers),"checkerIds":csv(checkers),"milestones":marks,"documents":docs];if let p=mapSelection{value["center"]=["lat":p.lat,"lng":p.lng]};return value
+    case "assets": var value:[String:Any]=["name":name,"location":location,"condition":condition,"attributes":Dictionary(uniqueKeysWithValues:attributes.split(separator:"\n").compactMap{line->(String,String)? in let p=line.split(separator:"=",maxSplits:1).map{String($0).trimmingCharacters(in:.whitespaces)};return p.count==2 ? (p[0],p[1]):nil})];if let p=mapSelection{value["geometry"]=["type":"Point","coordinates":[p.lng,p.lat]]};return value
+    default:return [:]
+    }
+  }
+  func save() async { await app.mutate { _ = try await app.api.patch("/api/\(module.id)/\(record["id"] as? String ?? "")",body:payload());await app.load(module);isPresented=false } }
+}
+
+struct GisImportView: View {
+  @EnvironmentObject var app: AppModel
+  @Binding var isPresented: Bool
+  @State private var choosingFile = false
+  @State private var fileName = ""
+  @State private var parsed: [String: Any]?
+  @State private var projects: [[String: Any]] = []
+  @State private var assets: [[String: Any]] = []
+  @State private var layers: [[String: Any]] = []
+  @State private var projectId = ""
+  @State private var assetType = ""
+  @State private var layerName = ""
+  @State private var description = "Imported infrastructure network"
+  @State private var sourceIdField = ""
+  @State private var nameField = ""
+  @State private var replaceLayerId = ""
+  var fields: [String] { parsed?["fields"] as? [String] ?? [] }
+  var types: [String] {
+    Array(Set(assets.compactMap { $0["type"] as? String } + projects.compactMap { $0["assetType"] as? String })).sorted()
+  }
+  var projectLayers: [[String: Any]] { layers.filter { ($0["projectId"] as? String) == projectId && ($0["visible"] as? Bool) != false } }
+  var featureCount: Int { ((parsed?["featureCollection"] as? [String: Any])?["features"] as? [Any])?.count ?? 0 }
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Source file") {
+          Button { choosingFile = true } label: { Label(fileName.isEmpty ? "Choose KML, KMZ or Shapefile ZIP" : fileName, systemImage: "doc.badge.plus") }
+          if let parsed {
+            LabeledContent("Format", value: parsed["format"] as? String ?? "")
+            LabeledContent("Features", value: "\(featureCount)")
+          }
+        }
+        if parsed != nil {
+          Section("Publish as versioned infrastructure") {
+            Picker("Project", selection: $projectId) {
+              ForEach(Array(projects.enumerated()), id: \.offset) { _, project in
+                Text("\(project["code"] as? String ?? "") · \(project["name"] as? String ?? "")").tag(project["id"] as? String ?? "")
+              }
+            }
+            Picker("Asset type", selection: $assetType) { ForEach(types, id: \.self) { Text($0).tag($0) } }
+            TextField("Layer name", text: $layerName)
+            TextField("Description", text: $description, axis: .vertical)
+            Picker("Unique source ID", selection: $sourceIdField) {
+              Text("Generate deterministic IDs").tag("")
+              ForEach(fields, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("Feature name", selection: $nameField) {
+              Text("Generate names").tag("")
+              ForEach(fields, id: \.self) { Text($0).tag($0) }
+            }
+            if !projectLayers.isEmpty {
+              Picker("Replace layer", selection: $replaceLayerId) {
+                Text("Publish as new layer").tag("")
+                ForEach(Array(projectLayers.enumerated()), id: \.offset) { _, layer in
+                  Text("\(layer["name"] as? String ?? "Layer") · v\(layer["version"] as? Int ?? 1)").tag(layer["id"] as? String ?? "")
+                }
+              }
+            }
+          }
+          if let warnings = parsed?["warnings"] as? [String], !warnings.isEmpty {
+            Section("Validation notes") { ForEach(warnings, id: \.self) { Text($0).foregroundStyle(.orange) } }
+          }
+          Section { Text("Publishing creates or updates mapped assets, records an auditable layer version, and supports one-tap rollback.").font(.caption).foregroundStyle(.secondary) }
+        }
+      }.navigationTitle("Import GIS network").toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isPresented = false } }
+        ToolbarItem(placement: .confirmationAction) { Button("Publish") { Task { await publish() } }.disabled(parsed == nil || projectId.isEmpty || assetType.isEmpty || layerName.count < 3) }
+      }.fileImporter(isPresented: $choosingFile, allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
+        Task { await select(result) }
+      }.task { await loadOptions() }
+    }
+  }
+  func loadOptions() async {
+    await app.mutate {
+      projects = try await app.api.get("/api/projects") as? [[String: Any]] ?? []
+      assets = try await app.api.get("/api/assets") as? [[String: Any]] ?? []
+      layers = try await app.api.get("/api/gis/layers") as? [[String: Any]] ?? []
+      projectId = projects.first?["id"] as? String ?? ""
+      assetType = assets.first?["type"] as? String ?? projects.first?["assetType"] as? String ?? ""
+    }
+  }
+  func select(_ result: Result<[URL], Error>) async {
+    await app.mutate {
+      let urls = try result.get()
+      guard let url = urls.first else { throw APIError.server("No GIS file was selected") }
+      let scoped = url.startAccessingSecurityScopedResource()
+      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+      let data = try Data(contentsOf: url)
+      fileName = url.lastPathComponent
+      parsed = try await app.api.parseGisFile(data: data, fileName: fileName)
+      layerName = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+      sourceIdField = fields.first { $0.range(of: "^(asset_?id|id|uid)$", options: [.regularExpression, .caseInsensitive]) != nil } ?? ""
+      nameField = fields.first { $0.caseInsensitiveCompare("name") == .orderedSame } ?? ""
+    }
+  }
+  func publish() async {
+    guard let parsed, let featureCollection = parsed["featureCollection"] else { return }
+    await app.mutate {
+      _ = try await app.api.post("/api/gis/imports", body: [
+        "projectId": projectId, "assetType": assetType, "layerName": layerName, "description": description,
+        "fileName": fileName, "format": parsed["format"] as? String ?? "KML",
+        "sourceIdField": sourceIdField.isEmpty ? NSNull() : sourceIdField,
+        "nameField": nameField.isEmpty ? NSNull() : nameField,
+        "replaceLayerId": replaceLayerId.isEmpty ? NSNull() : replaceLayerId,
+        "style": ["color": "#104685", "width": 5, "opacity": 0.82],
+        "featureCollection": featureCollection, "warnings": parsed["warnings"] as? [String] ?? [],
+      ])
+      await app.load(modules.first { $0.id == "gis_imports" }!)
+      isPresented = false
+    }
   }
 }
 
@@ -568,6 +794,41 @@ struct CreateView: View {
   @State private var first = ""
   @State private var second = ""
   @State private var third = ""
+  @State private var fourth = ""
+  @State private var projects: [[String: Any]] = []
+  @State private var users: [[String: Any]] = []
+  @State private var assets: [[String: Any]] = []
+  @State private var tenants: [[String: Any]] = []
+  @State private var projectId = ""
+  @State private var makerId = ""
+  @State private var checkerId = ""
+  @State private var authorityId = ""
+  @State private var assetId = ""
+  @State private var tenantId = ""
+  @State private var userRole = "maker"
+  @State private var designation = "Field user"
+  @State private var bulkUsers = ""
+  @State private var assetType = "Road"
+  @State private var condition = "Good"
+  @State private var attributes = ""
+  @State private var latitude = "28.613900"
+  @State private var longitude = "77.209000"
+  @State private var radius = "250"
+  @State private var inspectionType = "Requested"
+  @State private var inspectionDate = Date().addingTimeInterval(86_400)
+  @State private var inspectionChecklist = "Structural condition, Electrical safety, Fire safety"
+  @State private var hierarchy = "Head Office > Division > Site"
+  @State private var enabledModules = "Asset Management, Attendance, Inspections, Defect Management"
+  @State private var tenantAssetType = "Road"
+  @State private var tenantAttributes = "Length, Surface"
+  @State private var tenantChecklist = "Surface condition, Drainage, Safety"
+  @State private var additionalAssetTypes = ""
+  @State private var slaHours = "24,72,168,360"
+  @State private var dataMigration = false
+  @State private var adminName = ""
+  @State private var adminEmail = ""
+  @State private var adminMobile = ""
+  @State private var mapSelection: MapMarker?
   @State private var evidenceItem: PhotosPickerItem?
   @State private var evidenceData: Data?
   @State private var evidenceMimeType = "image/jpeg"
@@ -582,16 +843,77 @@ struct CreateView: View {
     case "assets": return ["Asset name", "Asset type", "Location"]
     case "users": return ["Full name", "Email", "Mobile"]
     case "tenants": return ["Organisation name", "Short name", "Organisation type"]
-    case "inspections": return ["Project ID", "Asset ID", "Checker ID"]
+    case "inspections": return ["Inspection request reference", "", ""]
     default: return ["Project ID", "", ""]
     }
   }
+  var canSubmit: Bool { (module.id == "attendance" || module.id == "inspections" || !first.isEmpty || (module.id == "users" && !bulkUsers.isEmpty)) && (module.id != "defects" || evidenceData != nil) }
   var body: some View {
     NavigationStack {
       Form {
         TextField(labels[0], text: $first)
         if !labels[1].isEmpty { TextField(labels[1], text: $second) }
         if !labels[2].isEmpty { TextField(labels[2], text: $third) }
+        if ["projects","assets"].contains(module.id) {
+          NativeMap(dataset: MapDataset(), selected: $mapSelection).frame(height: 230).clipShape(RoundedRectangle(cornerRadius: 14))
+            .onChange(of: mapSelection) { _, point in guard let point else{return};latitude=String(format:"%.6f",point.lat);longitude=String(format:"%.6f",point.lng);Task{third=(try? await app.api.reverse(lat:point.lat,lng:point.lng)) ?? "\(latitude), \(longitude)"} }
+          Text("Tap the Mappls map to place the \(module.id == "projects" ? "project centre":"asset").").font(.caption).foregroundStyle(.secondary)
+        }
+        if module.id == "users" {
+          if app.session?.user.role == .tenantAdmin {
+            Picker("Tenant", selection: $tenantId) {
+              Text("Platform-wide / no tenant").tag("")
+              ForEach(Array(tenants.enumerated()), id: \.offset) { _, tenant in Text(tenant["name"] as? String ?? "Tenant").tag(tenant["id"] as? String ?? "") }
+            }
+          }
+          Picker("Role", selection: $userRole) { Text("Authority").tag("authority"); Text("Maker").tag("maker"); Text("Checker").tag("checker") }
+          TextField("Designation", text: $designation)
+          TextField("Bulk users · Name | email | mobile | role | designation", text: $bulkUsers, axis: .vertical).lineLimit(3...10)
+          Text("Optional: one user per line. Bulk rows use the selected tenant.").font(.caption).foregroundStyle(.secondary)
+        }
+        if module.id == "projects" {
+          Picker("Primary asset type", selection: $assetType) { ForEach(Array(Set(projects.compactMap { $0["assetType"] as? String } + assets.compactMap { $0["type"] as? String })).sorted().isEmpty ? ["Road"] : Array(Set(projects.compactMap { $0["assetType"] as? String } + assets.compactMap { $0["type"] as? String })).sorted(), id: \.self) { Text($0).tag($0) } }
+          Picker("Assigned Maker", selection: $makerId) { Text("Assign later").tag(""); ForEach(Array(users.filter { $0["role"] as? String == "maker" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Maker").tag(user["id"] as? String ?? "") } }
+          Picker("Assigned Checker", selection: $checkerId) { Text("Assign later").tag(""); ForEach(Array(users.filter { $0["role"] as? String == "checker" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Checker").tag(user["id"] as? String ?? "") } }
+          TextField("Centre latitude", text: $latitude).keyboardType(.numbersAndPunctuation)
+          TextField("Centre longitude", text: $longitude).keyboardType(.numbersAndPunctuation)
+          TextField("Geofence radius · metres", text: $radius).keyboardType(.numberPad)
+          Button("Use current GPS and Mappls address") { location.request(); applyCurrentLocation() }
+        }
+        if module.id == "assets" {
+          Picker("Project", selection: $projectId) { ForEach(Array(projects.enumerated()), id: \.offset) { _, project in Text("\(project["code"] as? String ?? "") · \(project["name"] as? String ?? "")").tag(project["id"] as? String ?? "") } }
+          Picker("Condition", selection: $condition) { ForEach(["Good","Fair","Attention","Critical"], id: \.self) { Text($0).tag($0) } }
+          TextField("Attributes · one key=value per line", text: $attributes, axis: .vertical).lineLimit(3...8)
+          TextField("Latitude", text: $latitude).keyboardType(.numbersAndPunctuation)
+          TextField("Longitude", text: $longitude).keyboardType(.numbersAndPunctuation)
+          Button("Place at current GPS") { location.request(); applyCurrentLocation() }
+        }
+        if module.id == "payments" {
+          Picker("Project", selection: $projectId) { ForEach(Array(projects.enumerated()), id: \.offset) { _, project in Text("\(project["code"] as? String ?? "") · \(project["name"] as? String ?? "")").tag(project["id"] as? String ?? "") } }
+          Picker("Checker", selection: $checkerId) { ForEach(Array(users.filter { $0["role"] as? String == "checker" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Checker").tag(user["id"] as? String ?? "") } }
+          Picker("Authority", selection: $authorityId) { ForEach(Array(users.filter { $0["role"] as? String == "authority" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Authority").tag(user["id"] as? String ?? "") } }
+          TextField("Inspection reference", text: $fourth)
+        }
+        if module.id == "inspections" {
+          Picker("Project", selection: $projectId) { ForEach(Array(projects.enumerated()), id: \.offset) { _, project in Text("\(project["code"] as? String ?? "") · \(project["name"] as? String ?? "")").tag(project["id"] as? String ?? "") } }
+          Picker("Asset", selection: $assetId) { ForEach(Array(assets.filter { projectId.isEmpty || $0["projectId"] as? String == projectId }.enumerated()), id: \.offset) { _, asset in Text(asset["name"] as? String ?? "Asset").tag(asset["id"] as? String ?? "") } }
+          Picker("Inspection type", selection: $inspectionType) { Text("Request for Inspection").tag("Requested"); Text("Joint inspection").tag("Joint") }
+          Picker("Maker", selection: $makerId) { ForEach(Array(users.filter { $0["role"] as? String == "maker" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Maker").tag(user["id"] as? String ?? "") } }
+          Picker("Checker", selection: $checkerId) { ForEach(Array(users.filter { $0["role"] as? String == "checker" }.enumerated()), id: \.offset) { _, user in Text(user["name"] as? String ?? "Checker").tag(user["id"] as? String ?? "") } }
+          DatePicker("Schedule", selection: $inspectionDate)
+          TextField("Checklist items · comma separated", text: $inspectionChecklist, axis: .vertical).lineLimit(3...8)
+        }
+        if module.id == "tenants" {
+          TextField("Organisation hierarchy", text: $hierarchy)
+          TextField("Enabled modules · comma separated", text: $enabledModules, axis: .vertical)
+          TextField("Initial asset type", text: $tenantAssetType)
+          TextField("Asset attributes · comma separated", text: $tenantAttributes)
+          TextField("Inspection checklist · comma separated", text: $tenantChecklist)
+          TextField("Additional asset types · Name | attrs | checklist", text: $additionalAssetTypes, axis: .vertical).lineLimit(3...8)
+          TextField("SLA hours · Critical, High, Medium, Low", text: $slaHours)
+          Toggle("Existing-data migration required", isOn: $dataMigration)
+          Section("Optional initial Authority administrator") { TextField("Admin name", text: $adminName); TextField("Admin email", text: $adminEmail).textInputAutocapitalization(.never); TextField("Admin mobile", text: $adminMobile).keyboardType(.phonePad) }
+        }
         if module.id == "defects" {
           Button {
             if CameraPicker.isAvailable { showingCamera = true }
@@ -614,17 +936,39 @@ struct CreateView: View {
             Text(String(format: "GPS %.6f, %.6f · ±%.0f m", gps.coordinate.latitude, gps.coordinate.longitude, gps.horizontalAccuracy)).font(.caption).foregroundStyle(.secondary)
           } else { Button("Acquire current GPS") { location.request() } }
         }
-        Text("Related project/user assignments use the first eligible tenant record when omitted.")
+        Text("Assignments, geofences and configuration values are validated by the server before creation.")
           .font(.caption).foregroundStyle(.secondary)
     }.navigationTitle("Create \(module.id.capitalized)").toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isPresented = false } }
         ToolbarItem(placement: .confirmationAction) {
-          Button("Submit") { Task { await submit() } }.disabled(first.isEmpty || (module.id == "defects" && evidenceData == nil))
+          Button("Submit") { Task { await submit() } }.disabled(!canSubmit)
         }
       }
-    }.task { if module.id == "attendance" || module.id == "defects" { location.request() } }.sheet(isPresented: $showingCamera) {
+    }.task { await loadOptions(); if ["attendance","defects","projects","assets"].contains(module.id) { location.request() } }.sheet(isPresented: $showingCamera) {
       CameraPicker { evidenceData = $0; evidenceMimeType = "image/jpeg"; evidenceFileExtension = "jpg" }
     }
+  }
+  func loadOptions() async {
+    await app.mutate {
+      projects = (try? await app.api.get("/api/projects")) as? [[String: Any]] ?? []
+      users = (try? await app.api.get("/api/users")) as? [[String: Any]] ?? []
+      assets = (try? await app.api.get("/api/assets")) as? [[String: Any]] ?? []
+      if app.session?.user.role == .tenantAdmin { tenants = (try? await app.api.get("/api/tenants")) as? [[String: Any]] ?? [] }
+      projectId = projects.first?["id"] as? String ?? ""
+      tenantId = tenants.first?["id"] as? String ?? ""
+      assetId = assets.first?["id"] as? String ?? ""
+      makerId = users.first { $0["role"] as? String == "maker" }?["id"] as? String ?? ""
+      checkerId = users.first { $0["role"] as? String == "checker" }?["id"] as? String ?? ""
+      authorityId = users.first { $0["role"] as? String == "authority" }?["id"] as? String ?? ""
+      assetType = projects.first?["assetType"] as? String ?? assets.first?["type"] as? String ?? "Road"
+    }
+  }
+  func applyCurrentLocation() {
+    guard let gps = location.location else { return }
+    latitude = String(format: "%.6f", gps.coordinate.latitude)
+    longitude = String(format: "%.6f", gps.coordinate.longitude)
+    mapSelection = .init(lat:gps.coordinate.latitude,lng:gps.coordinate.longitude,title:module.id == "projects" ? "Project centre":"Asset location",kind:"Selection")
+    Task { third = (try? await app.api.reverse(lat: gps.coordinate.latitude, lng: gps.coordinate.longitude)) ?? "\(latitude), \(longitude)" }
   }
   func submit() async {
     await app.mutate {
@@ -641,7 +985,7 @@ struct CreateView: View {
       case "attendance":
         guard let gps = location.location else { throw APIError.server("Allow location access and wait for a GPS fix before submitting attendance.") }
         path = "/api/attendance"
-        body = ["projectId": first.isEmpty ? project : first, "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy, "offline": false]
+        body = ["projectId": projectId.isEmpty ? project : projectId, "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy, "offline": false]
       case "defects":
         guard let gps = location.location, let evidenceData else { throw APIError.server("Current GPS and one photo or video are required.") }
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
@@ -675,43 +1019,65 @@ struct CreateView: View {
       case "payments":
         path = "/api/payments"
         body = [
-          "projectId": project, "invoiceNo": first, "checkerId": checker, "authorityId": authority,
+          "projectId": projectId.isEmpty ? project : projectId, "invoiceNo": first, "checkerId": checkerId.isEmpty ? checker : checkerId, "authorityId": authorityId.isEmpty ? authority : authorityId,
           "amount": Double(second) ?? 1, "attendanceReference": third,
-          "inspectionReference": "Native app claim",
+          "inspectionReference": fourth.isEmpty ? "Native app claim" : fourth,
         ]
       case "projects":
         path = "/api/projects"
         body = [
-          "code": first, "name": second, "location": third, "assetType": "Road", "makerIds": [],
-          "checkerIds": [], "geofenceRadiusMeters": 250,
+          "code": first, "name": second, "location": third, "assetType": assetType,
+          "makerIds": makerId.isEmpty ? [] : [makerId], "checkerIds": checkerId.isEmpty ? [] : [checkerId],
+          "center": ["lat": Double(latitude) ?? 28.6139, "lng": Double(longitude) ?? 77.2090],
+          "geofenceRadiusMeters": Int(radius) ?? 250,
         ]
       case "assets":
         path = "/api/assets"
         body = [
-          "projectId": project, "name": first, "type": second, "location": third,
-          "condition": "Good", "attributes": [:], "layerId": NSNull(),
+          "projectId": projectId.isEmpty ? project : projectId, "name": first, "type": second.isEmpty ? assetType : second, "location": third,
+          "condition": condition, "attributes": Dictionary(uniqueKeysWithValues: attributes.split(separator: "\n").compactMap { line -> (String,String)? in let parts=line.split(separator:"=",maxSplits:1).map{String($0).trimmingCharacters(in:.whitespaces)}; return parts.count==2 && !parts[0].isEmpty ? (parts[0],parts[1]) : nil }),
+          "geometry": ["type":"Point","coordinates":[Double(longitude) ?? 77.2090,Double(latitude) ?? 28.6139]], "layerId": NSNull(),
         ]
       case "users":
+        let selectedTenant: Any = tenantId.isEmpty ? NSNull() : tenantId
+        let bulkRows = bulkUsers.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !bulkRows.isEmpty {
+          for row in bulkRows {
+            let parts = row.split(separator: "|", omittingEmptySubsequences: false).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard parts.count >= 3 else { throw APIError.server("Each bulk user needs Name | email | mobile | role | designation.") }
+            _ = try await app.api.post("/api/users", body: ["name":parts[0],"email":parts[1],"mobile":parts[2],"role":parts.count>3 && !parts[3].isEmpty ? parts[3]:"maker","designation":parts.count>4 && !parts[4].isEmpty ? parts[4]:"Field user","tenantId":selectedTenant])
+          }
+          await app.load(module)
+          isPresented = false
+          return
+        }
         path = "/api/users"
         body = [
-          "name": first, "email": second, "mobile": third, "role": "maker",
-          "designation": "Field user",
+          "name": first, "email": second, "mobile": third, "role": userRole,
+          "designation": designation, "tenantId": selectedTenant,
         ]
       case "tenants":
         path = "/api/tenants"
-        body = [
+        let hours = slaHours.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        var types:[[String:Any]] = [["name": tenantAssetType, "attributes": tenantAttributes.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }, "checklist": tenantChecklist.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }]]
+        types += additionalAssetTypes.split(separator:"\n").compactMap{line in let p=line.split(separator:"|",maxSplits:2).map{String($0).trimmingCharacters(in:.whitespaces)};guard let name=p.first,!name.isEmpty else{return nil};return ["name":name,"attributes":p.count>1 ? p[1].split(separator:",").map{String($0).trimmingCharacters(in:.whitespaces)}:[],"checklist":p.count>2 ? p[2].split(separator:",").map{String($0).trimmingCharacters(in:.whitespaces)}:[]]}
+        var tenantBody: [String: Any] = [
           "name": first, "shortName": second, "type": third,
-          "hierarchy": "Head Office > Division > Site",
-          "modules": ["Asset Management", "Attendance"],
-          "assetTypes": [["name": "Road", "attributes": [], "checklist": []]],
+          "hierarchy": hierarchy,
+          "modules": enabledModules.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
+          "assetTypes": types,
+          "slas": ["Critical":hours.count>0 ? hours[0]:24,"High":hours.count>1 ? hours[1]:72,"Medium":hours.count>2 ? hours[2]:168,"Low":hours.count>3 ? hours[3]:360],
+          "dataMigration": dataMigration,
         ]
+        if !adminName.isEmpty { tenantBody["initialAdmin"] = ["name":adminName,"email":adminEmail,"mobile":adminMobile,"designation":"Authority Administrator"] }
+        body = tenantBody
       case "inspections":
         path = "/api/inspections"
         body = [
-          "projectId": first.isEmpty ? project : first,
-          "assetId": second.isEmpty ? (assets.first?["id"] as? String ?? "") : second,
-          "type": "Requested", "makerId": maker, "checkerId": third.isEmpty ? checker : third,
-          "scheduledAt": ISO8601DateFormatter().string(from: Date()), "checklist": [],
+          "projectId": projectId.isEmpty ? project : projectId,
+          "assetId": assetId.isEmpty ? (assets.first?["id"] as? String ?? "") : assetId,
+          "type": inspectionType, "makerId": makerId.isEmpty ? maker : makerId, "checkerId": checkerId.isEmpty ? checker : checkerId,
+          "scheduledAt": ISO8601DateFormatter().string(from: inspectionDate), "checklist": inspectionChecklist.split(separator:",").map{$0.trimmingCharacters(in:.whitespaces)}.filter{!$0.isEmpty},
         ]
       default: return
       }

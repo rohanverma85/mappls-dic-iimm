@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { z, ZodError } from 'zod';
 import type { Defect, GeoJsonGeometry, HelpdeskTicket, Inspection, MediaEvidence, Notification, Payment, Role, StoreData, User } from '../shared/types.js';
 import { geofenceFor, haversineMeters } from './geo.js';
+import { parseGisBytes } from './gisFile.js';
 import { store } from './store.js';
 
 declare global {
@@ -342,6 +343,17 @@ export function createApp() {
       layers:tenantScope(data.gisLayers,req.user!), assets:tenantScope(data.assets,req.user!),
       defects:visibleToUser(data.defects,req.user!), projects:tenantScope(data.projects,req.user!),
     });
+  });
+  app.post('/api/gis/parse-file', auth, allow('authority'), express.raw({ type:'application/octet-stream', limit:'25mb' }), async (req, res) => {
+    const fileName = String(req.header('x-file-name') ?? '').trim();
+    if (!fileName) return res.status(400).json({ error:'X-File-Name is required.' });
+    try {
+      const bytes = req.body instanceof Buffer ? new Uint8Array(req.body) : new Uint8Array();
+      if (!bytes.byteLength) return res.status(400).json({ error:'The selected GIS file is empty.' });
+      res.json(await parseGisBytes(fileName, bytes));
+    } catch (error) {
+      res.status(400).json({ error:error instanceof Error ? error.message : 'The GIS file could not be parsed.' });
+    }
   });
   app.post('/api/gis/layers', auth, allow('authority'), async (req, res) => {
     const featureSchema = z.object({ type:z.literal('Feature'), id:z.string().optional(), geometry:geometrySchema, properties:z.record(z.union([z.string(),z.number(),z.boolean(),z.null()])).default({}) });
@@ -742,13 +754,13 @@ export function createApp() {
     if (query.length < 2) return res.json([]);
     const data = await store.all();
     const result = [
-      ...tenantScope(data.projects, req.user!).map((p) => ({ type:'Project', id:p.id, title:p.name, subtitle:`${p.code} · ${p.location}` })),
-      ...tenantScope(data.assets, req.user!).map((a) => ({ type:'Asset', id:a.id, title:a.name, subtitle:`${a.type} · ${a.location}` })),
-      ...tenantScope(data.gisLayers, req.user!).map((layer) => ({ type:'GIS Layer', id:layer.id, title:layer.name, subtitle:`${layer.source} · v${layer.version} · ${layer.status}` })),
-      ...tenantScope(data.inspections, req.user!).map((inspection) => ({ type:'Inspection', id:inspection.id, title:`${inspection.type} inspection`, subtitle:`${inspection.assetId} · ${inspection.status}` })),
-      ...visibleToUser(data.defects, req.user!).map((d) => ({ type:'Defect', id:d.id, title:d.title, subtitle:`${d.id} · ${d.status}` })),
-      ...visibleToUser(data.tickets, req.user!).map((t) => ({ type:'Helpdesk', id:t.id, title:t.subject, subtitle:`${t.id} · ${t.status}` })),
-      ...tenantScope(data.users.map((u) => ({ ...u, tenantId:u.tenantId })), req.user!).map((u) => ({ type:'User', id:u.id, title:u.name, subtitle:`${u.designation} · ${u.role}` })),
+      ...tenantScope(data.projects, req.user!).map((p) => ({ type:'Project', id:p.id, title:p.name, subtitle:`${p.code} · ${p.location}`, record:p })),
+      ...tenantScope(data.assets, req.user!).map((a) => ({ type:'Asset', id:a.id, title:a.name, subtitle:`${a.type} · ${a.location}`, record:a })),
+      ...tenantScope(data.gisLayers, req.user!).map((layer) => ({ type:'GIS Layer', id:layer.id, title:layer.name, subtitle:`${layer.source} · v${layer.version} · ${layer.status}`, record:layer })),
+      ...tenantScope(data.inspections, req.user!).map((inspection) => ({ type:'Inspection', id:inspection.id, title:`${inspection.type} inspection`, subtitle:`${inspection.assetId} · ${inspection.status}`, record:inspection })),
+      ...visibleToUser(data.defects, req.user!).map((d) => ({ type:'Defect', id:d.id, title:d.title, subtitle:`${d.id} · ${d.status}`, record:d })),
+      ...visibleToUser(data.tickets, req.user!).map((t) => ({ type:'Helpdesk', id:t.id, title:t.subject, subtitle:`${t.id} · ${t.status}`, record:t })),
+      ...tenantScope(data.users.map((u) => ({ ...u, tenantId:u.tenantId })), req.user!).map((u) => ({ type:'User', id:u.id, title:u.name, subtitle:`${u.designation} · ${u.role}`, record:u })),
     ].filter((item) => `${item.id} ${item.title} ${item.subtitle}`.toLowerCase().includes(query));
     res.json(result.slice(0,30));
   });

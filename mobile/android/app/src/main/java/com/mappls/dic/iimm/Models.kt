@@ -45,7 +45,7 @@ val MODULES = listOf(
     ModuleSpec("projects", "Projects", "Assignments, milestones, progress and geofences", "/api/projects", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER), "project"),
     ModuleSpec("assets", "Assets", "Infrastructure registry and condition", "/api/assets", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER), "asset"),
     ModuleSpec("gis", "GIS layers", "Mappls map, networks and imported versions", "/api/gis/layers", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER)),
-    ModuleSpec("gis_imports", "GIS import history", "Published network versions and rollback", "/api/gis/imports", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER)),
+    ModuleSpec("gis_imports", "GIS import history", "Publish KML, KMZ and zipped Shapefile network versions", "/api/gis/imports", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER), "gis_import"),
     ModuleSpec("attendance", "Attendance", "Server-verified project geofence", "/api/attendance", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER), "attendance"),
     ModuleSpec("inspections", "Inspections", "Joint/RFI checklists and verification", "/api/inspections", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER), "inspection"),
     ModuleSpec("defects", "Defects & citizen issues", "Validation, rectification, ATR and feedback", "/api/defects", setOf(Role.AUTHORITY, Role.MAKER, Role.CHECKER, Role.CITIZEN), "defect"),

@@ -113,6 +113,18 @@ describe('IIMM API', () => {
     expect(result.body.assets.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
   });
 
+  it('parses native KML uploads into validated GeoJSON before publishing', async () => {
+    const authority = await login('usr-auth-1');
+    const kml = `<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>Native marker</name><ExtendedData><Data name="asset_id"><value>NATIVE-001</value></Data></ExtendedData><Point><coordinates>79.9341,23.1462,0</coordinates></Point></Placemark></Document></kml>`;
+    const parsed = await request(app).post('/api/gis/parse-file').set(auth(authority))
+      .set('content-type','application/octet-stream').set('x-file-name','native-field.kml')
+      .send(Buffer.from(kml)).expect(200);
+    expect(parsed.body.format).toBe('KML');
+    expect(parsed.body.featureCollection.features).toHaveLength(1);
+    expect(parsed.body.featureCollection.features[0].geometry.coordinates).toEqual([79.9341,23.1462,0]);
+    expect(parsed.body.fields).toContain('asset_id');
+  });
+
   it('imports versioned GIS features as assets and rolls a replacement back safely', async () => {
     const authority = await login('usr-auth-1');
     const base = {projectId:'prj-1',assetType:'Highway Section',layerName:'NH-44 field import',description:'Client review import',fileName:'nh44-section.kml',format:'KML',sourceIdField:'asset_id',nameField:'name',style:{color:'#104685',width:5,opacity:.8},warnings:[]};
@@ -173,5 +185,13 @@ describe('IIMM API', () => {
       ],
     }).expect(200);
     expect(completed.body.status).toBe('Completed');
+  });
+
+  it('returns scoped full records for native search drill-down', async () => {
+    const authority = await login('usr-auth-1');
+    const result = await request(app).get('/api/search?q=NH-44').set(auth(authority)).expect(200);
+    expect(result.body.length).toBeGreaterThan(0);
+    expect(result.body[0].record).toBeTruthy();
+    expect(result.body[0].record.tenantId).toBe('tenant-nhai');
   });
 });
