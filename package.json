@@ -11,10 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "audit:interactions": "node scripts/audit-interactions.mjs",
+    "check:native-api": "node scripts/check-native-api.mjs",
     "check": "npm run typecheck && npm run audit:interactions && npm run test && npm run build"
   },
   "dependencies": {
     "@tmcw/togeojson": "^7.1.2",
+    "@xmldom/xmldom": "^0.8.14",
     "express": "^5.1.0",
     "fflate": "^0.8.3",
     "lucide-react": "^0.468.0",

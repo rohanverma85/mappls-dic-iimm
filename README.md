@@ -13,6 +13,8 @@ Integrated Infrastructure Management & Maintenance is a full-stack, role-aware p
 - Maker → Checker → Authority payment approval enforcement
 - Helpdesk, notifications, scoped search, CSV reports and activity/audit trail
 - Responsive desktop, tablet and mobile layouts
+- Native Kotlin/Jetpack Compose Android and SwiftUI iOS applications using the same role-scoped API and workflows
+- Authority GIS import for KML, KMZ and zipped Shapefile sources, with asset mapping, version replacement and rollback
 
 ## Run locally
 
@@ -54,4 +56,4 @@ Field evidence is uploaded as authenticated, tenant-scoped binary media with cap
 
 ## GIS scope decision
 
-The supplied PRD and HTML do not specify the acceptance, CRS, geometry, attribute-mapping, validation, topology, versioning or governance rules required for trustworthy KML/SHP ingestion. The implemented foundation therefore supports GeoJSON geometry and Mappls/mGIS-ready layer metadata without inventing those rules. See [GIS implementation decision record](docs/gis-client-decisions.md) for the exact client inputs required before KML/SHP import is completed.
+The supplied PRD and HTML do not settle every production GIS-governance choice. The prototype therefore implements an explicit, reviewable assumption set: KML/KMZ and zipped Shapefile parsing, GeoJSON normalization, field mapping, deterministic source IDs, tenant/project scoping, version replacement and auditable rollback. Network-topology repair, arbitrary CRS transformation and direct mGIS workspace synchronization remain review items. See the [GIS implementation decision record](docs/gis-client-decisions.md) and [native parity matrix](docs/native-mobile-parity.md).

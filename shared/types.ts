@@ -184,6 +184,7 @@ export interface Inspection {
   status: 'Scheduled' | 'Accepted' | 'Rejected' | 'Not Ready' | 'In Progress' | 'Paused' | 'Completed';
   checklist: { item: string; status: 'Pending' | 'Pass' | 'Flag'; note?: string }[];
   offlineState?: 'Synced' | 'Queued' | 'Conflict review';
+  defectIds?: string[];
 }
 
 export interface Defect {
@@ -210,6 +211,8 @@ export interface Defect {
   media: string[];
   geofence: GeofenceResult | null;
   locationAccuracyMeters?: number;
+  sourceInspectionId?: string;
+  sourceChecklistItem?: string;
   atr?: { summary: string; submittedAt: string; media: string[]; lat: number; lng: number; accuracyMeters?: number; verifiedAt?: string; checkerNote?: string };
   feedback?: { rating: number; comment: string; submittedAt: string; reopened: boolean };
 }

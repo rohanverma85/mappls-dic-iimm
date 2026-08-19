@@ -89,6 +89,20 @@ describe('IIMM API', () => {
     expect(result.body.status).toBe('Out of radius');
   });
 
+  it('syncs offline Maker attendance and still computes the geofence on the server', async () => {
+    const maker = await login('usr-maker-1');
+    const entityId = 'local-attendance-test';
+    const synced = await request(app).post('/api/sync').set(auth(maker)).send({ operations:[{
+      entityType:'Attendance', entityId, clientUpdatedAt:new Date().toISOString(),
+      payload:{ projectId:'prj-1', lat:28.6139, lng:77.2090, accuracyMeters:9, offline:true, withinGeofence:true },
+    }] }).expect(200);
+    expect(synced.body.applied).toContain(entityId);
+    const attendance = await request(app).get('/api/attendance').set(auth(maker)).expect(200);
+    const record = attendance.body.find((item:{projectId:string}) => item.projectId === 'prj-1');
+    expect(record.withinGeofence).toBe(false);
+    expect(record.status).toBe('Out of radius');
+  });
+
   it('returns tenant-scoped GIS layers, assets, projects and defects', async () => {
     const authority = await login('usr-auth-1');
     const result = await request(app).get('/api/gis/overview').set(auth(authority)).expect(200);
@@ -97,6 +111,18 @@ describe('IIMM API', () => {
     expect(result.body.layers[0].id).toBe('layer-nh44');
     expect(result.body.layers.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
     expect(result.body.assets.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
+  });
+
+  it('parses native KML uploads into validated GeoJSON before publishing', async () => {
+    const authority = await login('usr-auth-1');
+    const kml = `<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>Native marker</name><ExtendedData><Data name="asset_id"><value>NATIVE-001</value></Data></ExtendedData><Point><coordinates>79.9341,23.1462,0</coordinates></Point></Placemark></Document></kml>`;
+    const parsed = await request(app).post('/api/gis/parse-file').set(auth(authority))
+      .set('content-type','application/octet-stream').set('x-file-name','native-field.kml')
+      .send(Buffer.from(kml)).expect(200);
+    expect(parsed.body.format).toBe('KML');
+    expect(parsed.body.featureCollection.features).toHaveLength(1);
+    expect(parsed.body.featureCollection.features[0].geometry.coordinates).toEqual([79.9341,23.1462,0]);
+    expect(parsed.body.fields).toContain('asset_id');
   });
 
   it('imports versioned GIS features as assets and rolls a replacement back safely', async () => {
@@ -159,5 +185,41 @@ describe('IIMM API', () => {
       ],
     }).expect(200);
     expect(completed.body.status).toBe('Completed');
+    expect(completed.body.defectIds).toHaveLength(1);
+    const defects = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    const raised = defects.body.find((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1140');
+    expect(raised).toMatchObject({
+      sourceChecklistItem:'Parapets', projectId:'prj-1', assetId:'asset-1', makerId:'usr-maker-1', checkerId:'usr-checker-1', status:'Assigned',
+    });
+    await request(app).patch('/api/inspections/INS-1140').set(auth(maker)).send({status:'Completed'}).expect(200);
+    const afterRepeat = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    expect(afterRepeat.body.filter((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1140')).toHaveLength(1);
+  });
+
+  it('raises linked defects when an offline inspection completion syncs', async () => {
+    const maker = await login('usr-maker-2');
+    const synced = await request(app).post('/api/sync').set(auth(maker)).send({ operations:[{
+      entityType:'Inspection', entityId:'INS-1138', clientUpdatedAt:new Date(Date.now()+60_000).toISOString(), payload:{
+        status:'Completed', checklist:[
+          {item:'Structural cracks',status:'Pass'}, {item:'Electrical wiring',status:'Pass'},
+          {item:'Fire safety equipment',status:'Flag',note:'Two extinguishers expired'}, {item:'Roof waterproofing',status:'Pass'},
+        ],
+      },
+    }] }).expect(200);
+    expect(synced.body.applied).toContain('INS-1138');
+    const defects = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    const raised = defects.body.filter((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1138');
+    expect(raised).toHaveLength(1);
+    expect(raised[0]).toMatchObject({ sourceChecklistItem:'Fire safety equipment', makerId:'usr-maker-2', checkerId:'usr-checker-2' });
+    const inspections = await request(app).get('/api/inspections').set(auth(maker)).expect(200);
+    expect(inspections.body.find((item:{id:string}) => item.id === 'INS-1138').defectIds).toEqual([raised[0].id]);
+  });
+
+  it('returns scoped full records for native search drill-down', async () => {
+    const authority = await login('usr-auth-1');
+    const result = await request(app).get('/api/search?q=NH-44').set(auth(authority)).expect(200);
+    expect(result.body.length).toBeGreaterThan(0);
+    expect(result.body[0].record).toBeTruthy();
+    expect(result.body[0].record.tenantId).toBe('tenant-nhai');
   });
 });

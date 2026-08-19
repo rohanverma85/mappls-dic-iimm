@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { z, ZodError } from 'zod';
 import type { Defect, GeoJsonGeometry, HelpdeskTicket, Inspection, MediaEvidence, Notification, Payment, Role, StoreData, User } from '../shared/types.js';
 import { geofenceFor, haversineMeters } from './geo.js';
+import { parseGisBytes } from './gisFile.js';
 import { store } from './store.js';
 
 declare global {
@@ -88,6 +89,35 @@ const geometryCentre = (geometry:GeoJsonGeometry) => {
   const points = coordinatesFor(geometry);
   const [lng,lat] = points.reduce(([x,y],[px,py])=>[x+px,y+py],[0,0]);
   return {lng:lng/points.length,lat:lat/points.length};
+};
+
+const raiseInspectionDefects = (data:StoreData, inspection:Inspection, reporterId:string) => {
+  if (inspection.status !== 'Completed') return [];
+  const project = data.projects.find((candidate) => candidate.id === inspection.projectId && candidate.tenantId === inspection.tenantId);
+  const asset = data.assets.find((candidate) => candidate.id === inspection.assetId && candidate.tenantId === inspection.tenantId);
+  if (!project || !asset) return [];
+  const location = geometryCentre(asset.geometry);
+  const dueHours = data.tenants.find((candidate) => candidate.id === inspection.tenantId)?.slas.Medium ?? 168;
+  const existingItems = new Set(data.defects.filter((defect) => defect.sourceInspectionId === inspection.id).map((defect) => defect.sourceChecklistItem));
+  const created:Defect[] = [];
+  for (const flagged of inspection.checklist.filter((entry) => entry.status === 'Flag' && !existingItems.has(entry.item))) {
+    const defect:Defect = {
+      id:`DEF-${Math.floor(1000+Math.random()*9000)}`, tenantId:inspection.tenantId, projectId:inspection.projectId, assetId:inspection.assetId,
+      source:'Internal', reporterId, title:`Inspection flag · ${flagged.item}`,
+      description:flagged.note?.trim() || `${flagged.item} was flagged during inspection ${inspection.id}.`,
+      location:asset.location, lat:location.lat, lng:location.lng, severity:'Medium', status:'Assigned', checkerValidation:'Not required',
+      makerId:inspection.makerId, checkerId:inspection.checkerId, duplicateOf:null, duplicateCount:0, createdAt:new Date().toISOString(),
+      dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString(), media:[], geofence:geofenceFor(location,project,asset),
+      sourceInspectionId:inspection.id, sourceChecklistItem:flagged.item,
+    };
+    data.defects.unshift(defect);
+    created.push(defect);
+  }
+  inspection.defectIds = Array.from(new Set([
+    ...(inspection.defectIds ?? []),
+    ...data.defects.filter((defect) => defect.sourceInspectionId === inspection.id).map((defect) => defect.id),
+  ]));
+  return created;
 };
 
 const featureSourceId = (feature:{id?:string;geometry:GeoJsonGeometry;properties:Record<string,string|number|boolean|null>}, sourceIdField:string|null) => {
@@ -343,6 +373,17 @@ export function createApp() {
       defects:visibleToUser(data.defects,req.user!), projects:tenantScope(data.projects,req.user!),
     });
   });
+  app.post('/api/gis/parse-file', auth, allow('authority'), express.raw({ type:'application/octet-stream', limit:'25mb' }), async (req, res) => {
+    const fileName = String(req.header('x-file-name') ?? '').trim();
+    if (!fileName) return res.status(400).json({ error:'X-File-Name is required.' });
+    try {
+      const bytes = req.body instanceof Buffer ? new Uint8Array(req.body) : new Uint8Array();
+      if (!bytes.byteLength) return res.status(400).json({ error:'The selected GIS file is empty.' });
+      res.json(await parseGisBytes(fileName, bytes));
+    } catch (error) {
+      res.status(400).json({ error:error instanceof Error ? error.message : 'The GIS file could not be parsed.' });
+    }
+  });
   app.post('/api/gis/layers', auth, allow('authority'), async (req, res) => {
     const featureSchema = z.object({ type:z.literal('Feature'), id:z.string().optional(), geometry:geometrySchema, properties:z.record(z.union([z.string(),z.number(),z.boolean(),z.null()])).default({}) });
     const body = z.object({ name:z.string().min(3), description:z.string().default(''), projectId:z.string().nullable().default(null), source:z.literal('GeoJSON').default('GeoJSON'), style:z.object({color:z.string().regex(/^#[0-9a-f]{6}$/i),width:z.number().min(1).max(12),opacity:z.number().min(0.1).max(1)}), featureCollection:z.object({type:z.literal('FeatureCollection'),features:z.array(featureSchema).min(1)}) }).parse(req.body);
@@ -476,7 +517,7 @@ export function createApp() {
   });
   app.patch('/api/inspections/:id', auth, allow('maker','checker','authority'), async (req, res) => {
     const body = z.object({ status:z.enum(['Accepted','Rejected','Not Ready','In Progress','Paused','Completed']).optional(), checklist:z.array(z.object({ item:z.string(), status:z.enum(['Pending','Pass','Flag']), note:z.string().optional() })).optional(), offlineState:z.enum(['Synced','Queued','Conflict review']).optional() }).parse(req.body);
-    const updated = await store.mutate((data) => {
+    const result = await store.mutate((data) => {
       const item = data.inspections.find((i) => i.id === req.params.id && i.tenantId === req.user!.tenantId);
       if (!item) return null;
       if (req.user!.role === 'maker' && item.makerId !== req.user!.id) return null;
@@ -485,11 +526,16 @@ export function createApp() {
       const nextChecklist = body.checklist ?? item.checklist;
       if (body.status === 'Completed' && nextChecklist.some((entry) => entry.status === 'Pending')) return null;
       Object.assign(item, body);
-      return item;
+      return { inspection:item, createdDefects:raiseInspectionDefects(data,item,req.user!.id) };
     });
-    if (!updated) return res.status(404).json({ error:'Inspection not found' });
-    await log(req.user!, 'UPDATED_INSPECTION', 'Inspection', updated.id, `Inspection moved to ${updated.status}.`);
-    res.json(updated);
+    if (!result) return res.status(404).json({ error:'Inspection not found' });
+    await log(req.user!, 'UPDATED_INSPECTION', 'Inspection', result.inspection.id, `Inspection moved to ${result.inspection.status}.`);
+    for (const defect of result.createdDefects) {
+      await log(req.user!, 'RAISED_DEFECT_FROM_INSPECTION', 'Defect', defect.id, `${defect.sourceChecklistItem} was raised from ${result.inspection.id}.`);
+      await notify(defect.makerId, 'Inspection defect assigned', `${defect.id} · ${defect.title}`, 'assignment');
+      await notify(defect.checkerId, 'Inspection defect created', `${defect.id} · ${defect.title}`, 'assignment');
+    }
+    res.json(result.inspection);
   });
 
   app.get('/api/defects', auth, async (req, res) => res.json(visibleToUser((await store.all()).defects, req.user!)));
@@ -688,10 +734,11 @@ export function createApp() {
   });
   app.post('/api/sync/conflicts/:id/resolve',auth,allow('checker','authority'),async(req,res)=>{const body=z.object({decision:z.enum(['keep-server','reviewed-client']),note:z.string().min(3)}).parse(req.body);const resolved=await store.mutate((data)=>{const index=data.syncConflicts.findIndex((item)=>item.id===req.params.id&&item.tenantId===req.user!.tenantId);if(index<0)return null;return data.syncConflicts.splice(index,1)[0];});if(!resolved)return res.status(404).json({error:'Sync conflict not found.'});await log(req.user!,'RESOLVED_SYNC_CONFLICT',resolved.entityType,resolved.entityId,`${body.decision}: ${body.note}`);res.json({ok:true,id:resolved.id});});
   app.post('/api/sync', auth, allow('maker','checker'), async (req, res) => {
-    const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
+    const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect','Attendance']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
     const result = await store.mutate((data) => {
       const applied:string[] = [];
       const conflicts = [];
+      const createdInspectionDefects:Defect[] = [];
       for (const operation of body.operations) {
         const lastServerEvent = data.activities.find((entry) => entry.entityId === operation.entityId);
         const serverUpdatedAt = lastServerEvent?.timestamp ?? '1970-01-01T00:00:00.000Z';
@@ -704,19 +751,48 @@ export function createApp() {
         if (operation.entityType === 'Inspection') {
           const inspection = data.inspections.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
           const parsed = z.object({ status:z.enum(['Accepted','Rejected','Not Ready','In Progress','Paused','Completed']).optional(), checklist:z.array(z.object({item:z.string(),status:z.enum(['Pending','Pass','Flag']),note:z.string().optional()})).optional() }).safeParse(operation.payload);
-          if (inspection && parsed.success) { Object.assign(inspection, parsed.data, { offlineState:'Synced' as const }); applied.push(operation.entityId); }
+          if (inspection && parsed.success) {
+            const nextChecklist = parsed.data.checklist ?? inspection.checklist;
+            if (parsed.data.status === 'Completed' && nextChecklist.some((entry) => entry.status === 'Pending')) continue;
+            Object.assign(inspection, parsed.data, { offlineState:'Synced' as const });
+            createdInspectionDefects.push(...raiseInspectionDefects(data,inspection,req.user!.id));
+            applied.push(operation.entityId);
+          }
         }
         if (operation.entityType === 'Defect') {
           const defect = data.defects.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
           const parsed = z.object({ status:z.enum(['In Progress','Reopened']).optional() }).safeParse(operation.payload);
           if (defect && parsed.success) { Object.assign(defect, parsed.data); applied.push(operation.entityId); }
         }
+        if (operation.entityType === 'Attendance' && req.user!.role === 'maker') {
+          const parsed = z.object({ projectId:z.string(), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), accuracyMeters:z.number().min(0).max(10_000).optional() }).safeParse(operation.payload);
+          if (!parsed.success) continue;
+          const project = data.projects.find((item) => item.id === parsed.data.projectId && item.tenantId === req.user!.tenantId && item.makerIds.includes(req.user!.id));
+          if (!project) continue;
+          const today = new Date().toISOString().slice(0,10);
+          const existing = data.attendance.find((item) => item.makerId === req.user!.id && item.projectId === project.id && item.date === today);
+          if (!existing) {
+            const distanceMeters = haversineMeters({lat:parsed.data.lat,lng:parsed.data.lng},project.center);
+            const withinGeofence = distanceMeters <= project.geofenceRadiusMeters;
+            data.attendance.unshift({
+              id:id('att'), tenantId:req.user!.tenantId!, projectId:project.id, makerId:req.user!.id,
+              date:today, checkIn:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}), checkOut:null,
+              lat:parsed.data.lat, lng:parsed.data.lng, withinGeofence, status:withinGeofence ? 'Present' : 'Out of radius',
+            });
+          }
+          applied.push(operation.entityId);
+        }
       }
-      return { applied, conflicts };
+      return { applied, conflicts, createdInspectionDefects };
     });
     for (const entityId of result.applied) await log(req.user!, 'SYNCED_OFFLINE_CHANGE', 'OfflineOperation', entityId, 'Applied after reconnect using server-timestamp conflict rules.');
     for (const conflict of result.conflicts) await log(req.user!, 'QUEUED_SYNC_CONFLICT', conflict.entityType, conflict.entityId, 'Client edit is older than the server state and requires manual review.');
-    res.json(result);
+    for (const defect of result.createdInspectionDefects) {
+      await log(req.user!, 'RAISED_DEFECT_FROM_INSPECTION', 'Defect', defect.id, `${defect.sourceChecklistItem} was raised from ${defect.sourceInspectionId} after offline sync.`);
+      await notify(defect.makerId, 'Inspection defect assigned', `${defect.id} · ${defect.title}`, 'assignment');
+      await notify(defect.checkerId, 'Inspection defect created', `${defect.id} · ${defect.title}`, 'assignment');
+    }
+    res.json({ applied:result.applied, conflicts:result.conflicts });
   });
 
   app.get('/api/search', auth, async (req, res) => {
@@ -724,13 +800,13 @@ export function createApp() {
     if (query.length < 2) return res.json([]);
     const data = await store.all();
     const result = [
-      ...tenantScope(data.projects, req.user!).map((p) => ({ type:'Project', id:p.id, title:p.name, subtitle:`${p.code} · ${p.location}` })),
-      ...tenantScope(data.assets, req.user!).map((a) => ({ type:'Asset', id:a.id, title:a.name, subtitle:`${a.type} · ${a.location}` })),
-      ...tenantScope(data.gisLayers, req.user!).map((layer) => ({ type:'GIS Layer', id:layer.id, title:layer.name, subtitle:`${layer.source} · v${layer.version} · ${layer.status}` })),
-      ...tenantScope(data.inspections, req.user!).map((inspection) => ({ type:'Inspection', id:inspection.id, title:`${inspection.type} inspection`, subtitle:`${inspection.assetId} · ${inspection.status}` })),
-      ...visibleToUser(data.defects, req.user!).map((d) => ({ type:'Defect', id:d.id, title:d.title, subtitle:`${d.id} · ${d.status}` })),
-      ...visibleToUser(data.tickets, req.user!).map((t) => ({ type:'Helpdesk', id:t.id, title:t.subject, subtitle:`${t.id} · ${t.status}` })),
-      ...tenantScope(data.users.map((u) => ({ ...u, tenantId:u.tenantId })), req.user!).map((u) => ({ type:'User', id:u.id, title:u.name, subtitle:`${u.designation} · ${u.role}` })),
+      ...tenantScope(data.projects, req.user!).map((p) => ({ type:'Project', id:p.id, title:p.name, subtitle:`${p.code} · ${p.location}`, record:p })),
+      ...tenantScope(data.assets, req.user!).map((a) => ({ type:'Asset', id:a.id, title:a.name, subtitle:`${a.type} · ${a.location}`, record:a })),
+      ...tenantScope(data.gisLayers, req.user!).map((layer) => ({ type:'GIS Layer', id:layer.id, title:layer.name, subtitle:`${layer.source} · v${layer.version} · ${layer.status}`, record:layer })),
+      ...tenantScope(data.inspections, req.user!).map((inspection) => ({ type:'Inspection', id:inspection.id, title:`${inspection.type} inspection`, subtitle:`${inspection.assetId} · ${inspection.status}`, record:inspection })),
+      ...visibleToUser(data.defects, req.user!).map((d) => ({ type:'Defect', id:d.id, title:d.title, subtitle:`${d.id} · ${d.status}`, record:d })),
+      ...visibleToUser(data.tickets, req.user!).map((t) => ({ type:'Helpdesk', id:t.id, title:t.subject, subtitle:`${t.id} · ${t.status}`, record:t })),
+      ...tenantScope(data.users.map((u) => ({ ...u, tenantId:u.tenantId })), req.user!).map((u) => ({ type:'User', id:u.id, title:u.name, subtitle:`${u.designation} · ${u.role}`, record:u })),
     ].filter((item) => `${item.id} ${item.title} ${item.subtitle}`.toLowerCase().includes(query));
     res.json(result.slice(0,30));
   });

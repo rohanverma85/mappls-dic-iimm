@@ -1,0 +1,427 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1961E844115788DEE42164A0 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */; };
+		39B7CBD15043BF1F9BD7875F /* LocationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E695734573968BD5F48914 /* LocationController.swift */; };
+		6378051A2E1BEB2C7E95FDFB /* UtilityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DC6FBE869E17C63863A9D6 /* UtilityViews.swift */; };
+		6EEC3103DE3F4A8AA2B1C010 /* IIMMTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */; };
+		69597B4864E79E20D8AA216B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = ECD5106781ABF37F8B52F0C2 /* README.md */; };
+		7633BB822FFF5363DEC6E575 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */; };
+		847CC2B7A36B72B0D07D102C /* NativeMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D16A80C942B93F1063050C /* NativeMap.swift */; };
+		9B7A9B72937DA83480524100 /* MapplsMap in Frameworks */ = {isa = PBXBuildFile; productRef = 8925F645D74EC6EB256464CB /* MapplsMap */; };
+		AC6334CF2B6C73122843823F /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCC205A693CF2B449ECD0D87 /* APIClient.swift */; };
+		B96197DC76D437FD21D8546B /* IIMMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3638216A0C4ABD8F299EBABF /* IIMMApp.swift */; };
+		F1BB9F5B0D32E30619724D43 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C9522FD247D98D55800319 /* RootView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		14C9522FD247D98D55800319 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		3638216A0C4ABD8F299EBABF /* IIMMApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IIMMApp.swift; sourceTree = "<group>"; };
+		53735D06454EBCAD0D3FC496 /* IIMM.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IIMM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		63E695734573968BD5F48914 /* LocationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationController.swift; sourceTree = "<group>"; };
+		6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IIMMTheme.swift; sourceTree = "<group>"; };
+		76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A6DC6FBE869E17C63863A9D6 /* UtilityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityViews.swift; sourceTree = "<group>"; };
+		C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		DCC205A693CF2B449ECD0D87 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		E1D16A80C942B93F1063050C /* NativeMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMap.swift; sourceTree = "<group>"; };
+		ECD5106781ABF37F8B52F0C2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9AE8D92C298C9A255C34B14D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B7A9B72937DA83480524100 /* MapplsMap in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		00EC9A7610CC0BFB4FCE0B49 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				53735D06454EBCAD0D3FC496 /* IIMM.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		04984CCA57438DE2E176D110 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				864E4CE7EB794CA189D7A3CE /* Mappls */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		5FCC7DB68CD69B07A9AE86AA /* IIMM */ = {
+			isa = PBXGroup;
+			children = (
+				DCC205A693CF2B449ECD0D87 /* APIClient.swift */,
+				C9EA2AE4560A6B468C7BEFE3 /* AppModel.swift */,
+				3638216A0C4ABD8F299EBABF /* IIMMApp.swift */,
+				6EEC3103DE3F4A8AA2B1C011 /* IIMMTheme.swift */,
+				63E695734573968BD5F48914 /* LocationController.swift */,
+				76E8DD1EC6C4F5EB4D8FDF3C /* Models.swift */,
+				E1D16A80C942B93F1063050C /* NativeMap.swift */,
+				14C9522FD247D98D55800319 /* RootView.swift */,
+				A6DC6FBE869E17C63863A9D6 /* UtilityViews.swift */,
+				04984CCA57438DE2E176D110 /* Resources */,
+			);
+			path = IIMM;
+			sourceTree = "<group>";
+		};
+		864E4CE7EB794CA189D7A3CE /* Mappls */ = {
+			isa = PBXGroup;
+			children = (
+				ECD5106781ABF37F8B52F0C2 /* README.md */,
+			);
+			path = Mappls;
+			sourceTree = "<group>";
+		};
+		BD663E4D8E6C322C60BBF9F7 = {
+			isa = PBXGroup;
+			children = (
+				5FCC7DB68CD69B07A9AE86AA /* IIMM */,
+				00EC9A7610CC0BFB4FCE0B49 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F6A6F87217456BCE8D311437 /* IIMM */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4B8EDBC027FB4BC07064DBE7 /* Build configuration list for PBXNativeTarget "IIMM" */;
+			buildPhases = (
+				F4C5F7E890C8C7F3938B436D /* Sources */,
+				BE76A096632241A5765BEE29 /* Resources */,
+				6EEC3103DE3F4A8AA2B1C020 /* Copy Mappls credentials */,
+				9AE8D92C298C9A255C34B14D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IIMM;
+			packageProductDependencies = (
+				8925F645D74EC6EB256464CB /* MapplsMap */,
+			);
+			productName = IIMM;
+			productReference = 53735D06454EBCAD0D3FC496 /* IIMM.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		87A85454F7CFBA80F035D553 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					F6A6F87217456BCE8D311437 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 36B9343CFFD75AC30AA85EFB /* Build configuration list for PBXProject "IIMM" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = BD663E4D8E6C322C60BBF9F7;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				54F82D65484347C78DE42A52 /* XCRemoteSwiftPackageReference "mappls-map-ios-distribution" */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F6A6F87217456BCE8D311437 /* IIMM */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		BE76A096632241A5765BEE29 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				69597B4864E79E20D8AA216B /* README.md in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6EEC3103DE3F4A8AA2B1C020 /* Copy Mappls credentials */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Mappls credentials";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "SOURCE_DIR=\"${SRCROOT}/IIMM/Resources/Mappls\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nfor FILE in i.conf i.olf; do\n  if [ -f \"${SOURCE_DIR}/${FILE}\" ]; then\n    /bin/cp \"${SOURCE_DIR}/${FILE}\" \"${DEST_DIR}/${FILE}\"\n  fi\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F4C5F7E890C8C7F3938B436D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC6334CF2B6C73122843823F /* APIClient.swift in Sources */,
+				7633BB822FFF5363DEC6E575 /* AppModel.swift in Sources */,
+				B96197DC76D437FD21D8546B /* IIMMApp.swift in Sources */,
+				6EEC3103DE3F4A8AA2B1C010 /* IIMMTheme.swift in Sources */,
+				39B7CBD15043BF1F9BD7875F /* LocationController.swift in Sources */,
+				1961E844115788DEE42164A0 /* Models.swift in Sources */,
+				847CC2B7A36B72B0D07D102C /* NativeMap.swift in Sources */,
+				F1BB9F5B0D32E30619724D43 /* RootView.swift in Sources */,
+				6378051A2E1BEB2C7E95FDFB /* UtilityViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		58946A830152B29F6E87C731 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		998CAB8E75F6ECF24347E20C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A10E9601C539015DAB2BAAAC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "IIMM Platform";
+				INFOPLIST_KEY_NSCameraUsageDescription = "IIMM uses the camera to capture geo-tagged field evidence.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "IIMM uses your location for geo-fenced attendance, inspections, defects, and citizen reports.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "IIMM lets you attach field evidence from your photo library.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mappls.dic.iimm;
+				PRODUCT_NAME = IIMM;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AEBF096DB81C7948871E6E5F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "IIMM Platform";
+				INFOPLIST_KEY_NSCameraUsageDescription = "IIMM uses the camera to capture geo-tagged field evidence.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "IIMM uses your location for geo-fenced attendance, inspections, defects, and citizen reports.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "IIMM lets you attach field evidence from your photo library.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mappls.dic.iimm;
+				PRODUCT_NAME = IIMM;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		36B9343CFFD75AC30AA85EFB /* Build configuration list for PBXProject "IIMM" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				58946A830152B29F6E87C731 /* Debug */,
+				998CAB8E75F6ECF24347E20C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4B8EDBC027FB4BC07064DBE7 /* Build configuration list for PBXNativeTarget "IIMM" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10E9601C539015DAB2BAAAC /* Debug */,
+				AEBF096DB81C7948871E6E5F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		54F82D65484347C78DE42A52 /* XCRemoteSwiftPackageReference "mappls-map-ios-distribution" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mappls-api/mappls-map-ios-distribution.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.1.5;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8925F645D74EC6EB256464CB /* MapplsMap */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 54F82D65484347C78DE42A52 /* XCRemoteSwiftPackageReference "mappls-map-ios-distribution" */;
+			productName = MapplsMap;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 87A85454F7CFBA80F035D553 /* Project object */;
+}
