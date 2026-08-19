@@ -1,0 +1,61 @@
+name: Mirror to MapmyIndia GitLab
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+  delete:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mapmyindia-gitlab-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror branches and tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLAB_USERNAME: rohan
+      GITLAB_TOKEN: ${{ secrets.MAPMYINDIA_GITLAB_TOKEN }}
+      GITLAB_REPOSITORY: https://mmigit.mapmyindia.com/rohan/mappls-dic-iimm.git
+    steps:
+      - name: Check out the GitHub source of truth
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Mirror all GitHub branches and tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GITLAB_TOKEN}" ]]; then
+            echo "Required Actions secret MAPMYINDIA_GITLAB_TOKEN is not configured."
+            exit 1
+          fi
+
+          git fetch --force --prune origin \
+            '+refs/heads/*:refs/remotes/github-source/*' \
+            '+refs/tags/*:refs/tags/*'
+
+          git remote add mapmyindia "${GITLAB_REPOSITORY}"
+          basic_auth="$(printf '%s' "${GITLAB_USERNAME}:${GITLAB_TOKEN}" | base64 | tr -d '\n')"
+          auth_header="Authorization: Basic ${basic_auth}"
+
+          git -c http.https://mmigit.mapmyindia.com/.extraheader="${auth_header}" \
+            push --force --prune mapmyindia \
+            '+refs/remotes/github-source/*:refs/heads/*'
+
+          git -c http.https://mmigit.mapmyindia.com/.extraheader="${auth_header}" \
+            push --force --prune mapmyindia \
+            '+refs/tags/*:refs/tags/*'
