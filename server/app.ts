@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
-import type { Defect, HelpdeskTicket, Inspection, Payment, Role, StoreData, User } from '../shared/types.js';
+import type { Defect, GeoJsonGeometry, HelpdeskTicket, Inspection, Notification, Payment, Role, StoreData, User } from '../shared/types.js';
+import { geofenceFor, haversineMeters } from './geo.js';
 import { store } from './store.js';
 
 declare global {
@@ -54,6 +55,21 @@ const log = async (user: User, action: string, entityType: string, entityId: str
   await store.activity(user, action, entityType, entityId, detail);
 };
 
+const notify = async (userId: string | null | undefined, title: string, message: string, kind: Notification['kind']) => {
+  if (!userId) return;
+  await store.mutate((data) => {
+    data.notifications.unshift({ id:id('not'), userId, title, message, createdAt:new Date().toISOString(), read:false, kind });
+  });
+};
+
+const geometrySchema = z.discriminatedUnion('type', [
+  z.object({ type:z.literal('Point'), coordinates:z.tuple([z.number(),z.number()]) }),
+  z.object({ type:z.literal('LineString'), coordinates:z.array(z.tuple([z.number(),z.number()])).min(2) }),
+  z.object({ type:z.literal('MultiLineString'), coordinates:z.array(z.array(z.tuple([z.number(),z.number()])).min(2)).min(1) }),
+  z.object({ type:z.literal('Polygon'), coordinates:z.array(z.array(z.tuple([z.number(),z.number()])).min(4)).min(1) }),
+  z.object({ type:z.literal('MultiPolygon'), coordinates:z.array(z.array(z.array(z.tuple([z.number(),z.number()])).min(4)).min(1)).min(1) }),
+]);
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
@@ -82,6 +98,31 @@ export function createApp() {
     const data = await store.all();
     const tenant = req.user!.tenantId ? data.tenants.find((item) => item.id === req.user!.tenantId) ?? null : null;
     res.json({ token: tokenFor(req.user!), user: safeUser(req.user!), tenant });
+  });
+
+  app.get('/api/mappls/config', auth, (_req, res) => {
+    const accessToken = process.env.MAPPLS_ACCESS_TOKEN?.trim() || null;
+    res.json({
+      provider:'Mappls', configured:Boolean(accessToken), accessToken,
+      sdkVersion:'3.0', layer:'vector',
+      capabilities:['Vector basemap','Markers','GeoJSON network overlay','KML overlay adapter','Geofences','Reverse geocoding','mGIS WMS-ready layers'],
+    });
+  });
+
+  app.get('/api/mappls/reverse-geocode', auth, async (req, res) => {
+    const parsed = z.object({ lat:z.coerce.number().min(-90).max(90), lng:z.coerce.number().min(-180).max(180) }).parse(req.query);
+    const accessToken = process.env.MAPPLS_ACCESS_TOKEN?.trim();
+    if (!accessToken) return res.json({ configured:false, address:`${parsed.lat.toFixed(6)}, ${parsed.lng.toFixed(6)}`, source:'Device coordinates' });
+    const url = new URL('https://search.mappls.com/search/address/rev-geocode');
+    url.searchParams.set('lat', String(parsed.lat));
+    url.searchParams.set('lng', String(parsed.lng));
+    url.searchParams.set('access_token', accessToken);
+    const response = await fetch(url, { headers:{ accept:'application/json' } });
+    if (!response.ok) return res.status(502).json({ error:'Mappls reverse geocoding is temporarily unavailable.' });
+    const payload = await response.json() as { results?: Array<Record<string,string>> };
+    const first = payload.results?.[0] ?? {};
+    const address = first.formatted_address || first.formattedAddress || first.placeName || `${parsed.lat.toFixed(6)}, ${parsed.lng.toFixed(6)}`;
+    res.json({ configured:true, address, source:'Mappls Reverse Geocoding', result:first });
   });
 
   app.get('/api/dashboard', auth, async (req, res) => {
@@ -131,9 +172,9 @@ export function createApp() {
 
   app.get('/api/tenants', auth, allow('tenant_admin'), async (_req, res) => res.json((await store.all()).tenants));
   app.post('/api/tenants', auth, allow('tenant_admin'), async (req, res) => {
-    const body = z.object({ name:z.string().min(3), shortName:z.string().min(2).max(12), type:z.string().min(3), hierarchy:z.string().min(3), modules:z.array(z.string()).min(2), assetTypes:z.array(z.object({ name:z.string(), attributes:z.array(z.string()), checklist:z.array(z.string()) })), dataMigration:z.boolean().default(false) }).parse(req.body);
+    const body = z.object({ name:z.string().min(3), shortName:z.string().min(2).max(12), type:z.string().min(3), hierarchy:z.string().min(3), modules:z.array(z.string()).min(2), assetTypes:z.array(z.object({ name:z.string(), attributes:z.array(z.string()), checklist:z.array(z.string()) })), slas:z.object({Critical:z.number().int().min(1),High:z.number().int().min(1),Medium:z.number().int().min(1),Low:z.number().int().min(1)}).default({Critical:24,High:72,Medium:168,Low:360}), dataMigration:z.boolean().default(false) }).parse(req.body);
     const tenant = await store.mutate((data) => {
-      const created = { id:id('tenant'), name:body.name, shortName:body.shortName, type:body.type, hierarchy:body.hierarchy, status:'Provisioning' as const, modules:Array.from(new Set(['Access & Onboarding','Project Management',...body.modules])), assetTypes:body.assetTypes.map((a) => ({ ...a, id:id('at') })), slas:{Critical:24,High:72,Medium:168,Low:360}, dataMigration:body.dataMigration, primaryColor:'#104685', users:0 };
+      const created = { id:id('tenant'), name:body.name, shortName:body.shortName, type:body.type, hierarchy:body.hierarchy, status:'Provisioning' as const, modules:Array.from(new Set(['Access & Onboarding','Project Management',...body.modules])), assetTypes:body.assetTypes.map((a) => ({ ...a, id:id('at') })), slas:body.slas, dataMigration:body.dataMigration, primaryColor:'#104685', users:0 };
       data.tenants.push(created);
       return created;
     });
@@ -169,12 +210,24 @@ export function createApp() {
     await log(req.user!, 'INVITED_USER', 'User', created.id, `Invited ${created.name} as ${created.role}.`);
     res.status(201).json(created);
   });
+  app.patch('/api/users/:id', auth, allow('authority','tenant_admin'), async (req, res) => {
+    const body = z.object({ active:z.boolean().optional(), designation:z.string().min(2).optional(), role:z.enum(['authority','maker','checker']).optional() }).parse(req.body);
+    const updated = await store.mutate((data) => {
+      const user = data.users.find((item) => item.id === req.params.id && (req.user!.role === 'tenant_admin' || item.tenantId === req.user!.tenantId));
+      if (!user || user.role === 'tenant_admin' || user.role === 'citizen') return null;
+      Object.assign(user, body);
+      return user;
+    });
+    if (!updated) return res.status(404).json({ error:'Tenant user not found' });
+    await log(req.user!, 'UPDATED_USER_ACCESS', 'User', updated.id, `${updated.name} is ${updated.active ? 'active' : 'inactive'} as ${updated.role}.`);
+    res.json(updated);
+  });
 
   app.get('/api/projects', auth, async (req, res) => res.json(tenantScope((await store.all()).projects, req.user!)));
   app.post('/api/projects', auth, allow('authority'), async (req, res) => {
-    const body = z.object({ code:z.string().min(3), name:z.string().min(3), location:z.string().min(3), assetType:z.string().min(2), makerIds:z.array(z.string()).default([]), checkerIds:z.array(z.string()).default([]) }).parse(req.body);
+    const body = z.object({ code:z.string().min(3), name:z.string().min(3), location:z.string().min(3), assetType:z.string().min(2), makerIds:z.array(z.string()).default([]), checkerIds:z.array(z.string()).default([]), center:z.object({lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180)}).optional(), geofenceRadiusMeters:z.number().int().min(25).max(10_000).default(250) }).parse(req.body);
     const created = await store.mutate((data) => {
-      const project = { id:id('prj'), tenantId:req.user!.tenantId!, ...body, status:'Pending' as const, progress:0, milestones:[] };
+      const project = { id:id('prj'), tenantId:req.user!.tenantId!, ...body, center:body.center ?? {lat:28.6139,lng:77.2090}, status:'Pending' as const, progress:0, milestones:[], documents:[] };
       data.projects.unshift(project);
       return project;
     });
@@ -184,27 +237,61 @@ export function createApp() {
 
   app.get('/api/assets', auth, async (req, res) => res.json(tenantScope((await store.all()).assets, req.user!)));
   app.post('/api/assets', auth, allow('authority'), async (req, res) => {
-    const body = z.object({ projectId:z.string(), type:z.string(), name:z.string().min(3), location:z.string(), condition:z.enum(['Good','Fair','Attention','Critical']), attributes:z.record(z.string()).default({}) }).parse(req.body);
+    const body = z.object({ projectId:z.string(), type:z.string(), name:z.string().min(3), location:z.string(), condition:z.enum(['Good','Fair','Attention','Critical']), attributes:z.record(z.string()).default({}), geometry:geometrySchema.optional(), layerId:z.string().nullable().default(null) }).parse(req.body);
     const created = await store.mutate((data) => {
-      const asset = { id:id('asset'), tenantId:req.user!.tenantId!, ...body, lastInspected:'Not inspected' };
+      const project = data.projects.find((item) => item.id === body.projectId && item.tenantId === req.user!.tenantId);
+      if (!project) return null;
+      const asset = { id:id('asset'), tenantId:req.user!.tenantId!, ...body, geometry:(body.geometry ?? {type:'Point',coordinates:[project.center.lng,project.center.lat]}) as GeoJsonGeometry, lastInspected:'Not inspected' };
       data.assets.unshift(asset);
       return asset;
     });
+    if (!created) return res.status(404).json({ error:'Project not found in the active tenant.' });
     await log(req.user!, 'REGISTERED_ASSET', 'Asset', created.id, `Registered ${created.name}.`);
+    res.status(201).json(created);
+  });
+
+  app.get('/api/gis/layers', auth, async (req, res) => res.json(tenantScope((await store.all()).gisLayers, req.user!)));
+  app.get('/api/gis/overview', auth, async (req, res) => {
+    const data = await store.all();
+    res.json({
+      provider:'Mappls', configured:Boolean(process.env.MAPPLS_ACCESS_TOKEN?.trim()),
+      layers:tenantScope(data.gisLayers,req.user!), assets:tenantScope(data.assets,req.user!),
+      defects:visibleToUser(data.defects,req.user!), projects:tenantScope(data.projects,req.user!),
+    });
+  });
+  app.post('/api/gis/layers', auth, allow('authority'), async (req, res) => {
+    const featureSchema = z.object({ type:z.literal('Feature'), id:z.string().optional(), geometry:geometrySchema, properties:z.record(z.union([z.string(),z.number(),z.boolean(),z.null()])).default({}) });
+    const body = z.object({ name:z.string().min(3), description:z.string().default(''), projectId:z.string().nullable().default(null), source:z.literal('GeoJSON').default('GeoJSON'), style:z.object({color:z.string().regex(/^#[0-9a-f]{6}$/i),width:z.number().min(1).max(12),opacity:z.number().min(0.1).max(1)}), featureCollection:z.object({type:z.literal('FeatureCollection'),features:z.array(featureSchema).min(1)}) }).parse(req.body);
+    const created = await store.mutate((data) => {
+      if (body.projectId && !data.projects.some((project) => project.id === body.projectId && project.tenantId === req.user!.tenantId)) return null;
+      const geometryTypes = new Set(body.featureCollection.features.map((feature) => feature.geometry.type.replace('Multi','').replace('String','')));
+      const geometryType = geometryTypes.size > 1 ? 'Mixed' : geometryTypes.has('Point') ? 'Point' : geometryTypes.has('Line') ? 'Line' : 'Polygon';
+      const now = new Date().toISOString();
+      const layer = { id:id('layer'), tenantId:req.user!.tenantId!, ...body, geometryType:geometryType as 'Point'|'Line'|'Polygon'|'Mixed', status:'Published' as const, version:1, visible:true, createdAt:now, updatedAt:now };
+      data.gisLayers.unshift(layer);
+      return layer;
+    });
+    if (!created) return res.status(404).json({ error:'Project not found in the active tenant.' });
+    await log(req.user!, 'PUBLISHED_GIS_LAYER', 'GisLayer', created.id, `Published ${created.name} with ${created.featureCollection.features.length} features.`);
     res.status(201).json(created);
   });
 
   app.get('/api/attendance', auth, async (req, res) => res.json(tenantScope((await store.all()).attendance, req.user!)));
   app.post('/api/attendance', auth, allow('maker'), async (req, res) => {
-    const body = z.object({ projectId:z.string(), lat:z.number(), lng:z.number(), withinGeofence:z.boolean(), offline:z.boolean().default(false) }).parse(req.body);
+    const body = z.object({ projectId:z.string(), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), accuracyMeters:z.number().min(0).max(10_000).optional(), offline:z.boolean().default(false) }).parse(req.body);
     const today = new Date().toISOString().slice(0,10);
     const created = await store.mutate((data) => {
+      const project = data.projects.find((item) => item.id === body.projectId && item.tenantId === req.user!.tenantId && item.makerIds.includes(req.user!.id));
+      if (!project) return null;
       const existing = data.attendance.find((a) => a.makerId === req.user!.id && a.projectId === body.projectId && a.date === today);
       if (existing) return existing;
-      const record = { id:id('att'), tenantId:req.user!.tenantId!, projectId:body.projectId, makerId:req.user!.id, date:today, checkIn:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}), checkOut:null, lat:body.lat, lng:body.lng, withinGeofence:body.withinGeofence, status:(body.offline ? 'Pending sync' : body.withinGeofence ? 'Present' : 'Out of radius') as 'Pending sync'|'Present'|'Out of radius' };
+      const distanceMeters = haversineMeters({lat:body.lat,lng:body.lng},project.center);
+      const withinGeofence = distanceMeters <= project.geofenceRadiusMeters;
+      const record = { id:id('att'), tenantId:req.user!.tenantId!, projectId:body.projectId, makerId:req.user!.id, date:today, checkIn:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}), checkOut:null, lat:body.lat, lng:body.lng, withinGeofence, status:(body.offline ? 'Pending sync' : withinGeofence ? 'Present' : 'Out of radius') as 'Pending sync'|'Present'|'Out of radius' };
       data.attendance.unshift(record);
       return record;
     });
+    if (!created) return res.status(403).json({ error:'Attendance can be marked only against a project assigned to this Maker.' });
     await log(req.user!, 'MARKED_ATTENDANCE', 'Attendance', created.id, `${created.status} at ${created.lat.toFixed(4)}, ${created.lng.toFixed(4)}.`);
     res.status(201).json(created);
   });
@@ -225,6 +312,11 @@ export function createApp() {
     const updated = await store.mutate((data) => {
       const item = data.inspections.find((i) => i.id === req.params.id && i.tenantId === req.user!.tenantId);
       if (!item) return null;
+      if (req.user!.role === 'maker' && item.makerId !== req.user!.id) return null;
+      if (req.user!.role === 'checker' && item.checkerId !== req.user!.id) return null;
+      if (req.user!.role === 'authority' && (body.checklist || body.status === 'In Progress' || body.status === 'Paused' || body.status === 'Completed')) return null;
+      const nextChecklist = body.checklist ?? item.checklist;
+      if (body.status === 'Completed' && nextChecklist.some((entry) => entry.status === 'Pending')) return null;
       Object.assign(item, body);
       return item;
     });
@@ -235,11 +327,15 @@ export function createApp() {
 
   app.get('/api/defects', auth, async (req, res) => res.json(visibleToUser((await store.all()).defects, req.user!)));
   app.post('/api/defects', auth, async (req, res) => {
-    const body = z.object({ title:z.string().min(4), description:z.string().min(8), location:z.string().min(3), lat:z.number(), lng:z.number(), severity:z.enum(['Critical','High','Medium','Low']).default('Medium'), projectId:z.string().nullable().default(null), assetId:z.string().nullable().default(null), media:z.array(z.string()).default([]) }).parse(req.body);
+    const body = z.object({ title:z.string().min(4), description:z.string().min(8), location:z.string().min(3), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), locationAccuracyMeters:z.number().min(0).max(10_000).optional(), severity:z.enum(['Critical','High','Medium','Low']).default('Medium'), projectId:z.string().nullable().default(null), assetId:z.string().nullable().default(null), media:z.array(z.string()).default([]) }).parse(req.body);
     const data = await store.all();
     const source = req.user!.role === 'citizen' ? 'Citizen' : 'Internal';
+    const project = body.projectId ? data.projects.find((item) => item.id === body.projectId && item.tenantId === req.user!.tenantId) : undefined;
+    const asset = body.assetId ? data.assets.find((item) => item.id === body.assetId && item.tenantId === req.user!.tenantId) : undefined;
+    if (body.projectId && !project) return res.status(404).json({ error:'Project not found in the active tenant.' });
+    if (body.assetId && !asset) return res.status(404).json({ error:'Asset not found in the active tenant.' });
     if (source === 'Citizen') {
-      const duplicate = data.defects.find((d) => d.tenantId === req.user!.tenantId && activeStatuses.has(d.status) && ((body.assetId && d.assetId === body.assetId) || Math.hypot(d.lat-body.lat,d.lng-body.lng) < 0.003));
+      const duplicate = data.defects.find((d) => d.tenantId === req.user!.tenantId && activeStatuses.has(d.status) && ((body.assetId && d.assetId === body.assetId) || haversineMeters({lat:d.lat,lng:d.lng},{lat:body.lat,lng:body.lng}) <= 300));
       if (duplicate) {
         const updated = await store.mutate((state) => {
           const found = state.defects.find((d) => d.id === duplicate.id)!;
@@ -256,11 +352,12 @@ export function createApp() {
       const tenant = state.tenants.find((t) => t.id === req.user!.tenantId)!;
       const dueHours = tenant?.slas[body.severity] ?? 168;
       const checker = state.users.find((u) => u.tenantId === req.user!.tenantId && u.role === 'checker');
-      const defect: Defect = { id:`${source === 'Citizen' ? 'CIT':'DEF'}-${Math.floor(1000+Math.random()*9000)}`, tenantId:req.user!.tenantId!, projectId:body.projectId, assetId:body.assetId, source, reporterId:req.user!.id, title:body.title, description:body.description, location:body.location, lat:body.lat, lng:body.lng, severity:body.severity, status:source === 'Citizen' ? 'Under Checker Review':'Assigned', checkerValidation:source === 'Citizen' ? 'Pending':'Not required', makerId:source === 'Citizen' ? null : req.user!.role === 'maker' ? req.user!.id : null, checkerId:checker?.id ?? null, duplicateOf:null, duplicateCount:0, createdAt:new Date().toISOString(), dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString(), media:body.media };
+      const defect: Defect = { id:`${source === 'Citizen' ? 'CIT':'DEF'}-${Math.floor(1000+Math.random()*9000)}`, tenantId:req.user!.tenantId!, projectId:body.projectId, assetId:body.assetId, source, reporterId:req.user!.id, title:body.title, description:body.description, location:body.location, lat:body.lat, lng:body.lng, locationAccuracyMeters:body.locationAccuracyMeters, geofence:geofenceFor({lat:body.lat,lng:body.lng},project,asset), severity:body.severity, status:source === 'Citizen' ? 'Under Checker Review':'Assigned', checkerValidation:source === 'Citizen' ? 'Pending':'Not required', makerId:source === 'Citizen' ? null : req.user!.role === 'maker' ? req.user!.id : null, checkerId:checker?.id ?? null, duplicateOf:null, duplicateCount:0, createdAt:new Date().toISOString(), dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString(), media:body.media };
       state.defects.unshift(defect);
       return defect;
     });
     await log(req.user!, 'REPORTED_DEFECT', 'Defect', created.id, `${created.source} defect created with ${created.severity} severity.`);
+    await notify(created.checkerId, source === 'Citizen' ? 'Citizen defect awaiting validation' : 'Defect requires verification', `${created.id} · ${created.title}`, 'assignment');
     res.status(201).json({ duplicate:false, defect:created });
   });
   app.post('/api/defects/:id/validate', auth, allow('checker'), async (req, res) => {
@@ -273,37 +370,72 @@ export function createApp() {
       if (body.decision === 'approve') {
         defect.makerId = body.makerId ?? data.users.find((u) => u.tenantId === defect.tenantId && u.role === 'maker')?.id ?? null;
         defect.projectId = body.projectId ?? data.projects.find((p) => p.tenantId === defect.tenantId)?.id ?? null;
+        const assignedProject = data.projects.find((project) => project.id === defect.projectId && project.tenantId === defect.tenantId);
+        const linkedAsset = data.assets.find((asset) => asset.id === defect.assetId && asset.tenantId === defect.tenantId);
+        defect.geofence = geofenceFor({lat:defect.lat,lng:defect.lng},assignedProject,linkedAsset);
       }
       return defect;
     });
     if (!updated) return res.status(409).json({ error:'Defect is not awaiting validation.' });
     await log(req.user!, body.decision === 'approve' ? 'VALIDATED_CITIZEN_DEFECT':'REJECTED_CITIZEN_DEFECT', 'Defect', updated.id, `Checker ${body.decision}d citizen submission.`);
+    await notify(updated.reporterId, body.decision === 'approve' ? 'Report validated' : 'Report not accepted', `${updated.id} is now ${updated.status}.`, 'status');
+    if (body.decision === 'approve') await notify(updated.makerId, 'Defect assigned', `${updated.id} · ${updated.title}`, 'assignment');
+    res.json(updated);
+  });
+  app.post('/api/defects/:id/start', auth, allow('maker'), async (req, res) => {
+    const updated = await store.mutate((data) => {
+      const defect = data.defects.find((item) => item.id === req.params.id && item.tenantId === req.user!.tenantId && item.makerId === req.user!.id && ['Assigned','Reopened'].includes(item.status));
+      if (!defect) return null;
+      defect.status = 'In Progress';
+      return defect;
+    });
+    if (!updated) return res.status(409).json({ error:'This defect cannot be started by this Maker.' });
+    await log(req.user!, 'STARTED_DEFECT_WORK', 'Defect', updated.id, 'Maker started rectification in the field.');
+    await notify(updated.reporterId, 'Repair work started', `${updated.id} is now in progress.`, 'status');
     res.json(updated);
   });
   app.post('/api/defects/:id/atr', auth, allow('maker'), async (req, res) => {
-    const body = z.object({ summary:z.string().min(10) }).parse(req.body);
+    const body = z.object({ summary:z.string().min(10), media:z.array(z.string()).min(1), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), accuracyMeters:z.number().min(0).max(10_000).optional() }).parse(req.body);
     const updated = await store.mutate((data) => {
-      const defect = data.defects.find((d) => d.id === req.params.id && d.makerId === req.user!.id && ['Assigned','In Progress','Reopened'].includes(d.status));
+      const defect = data.defects.find((d) => d.id === req.params.id && d.makerId === req.user!.id && d.status === 'In Progress');
       if (!defect) return null;
-      defect.atr = { summary:body.summary, submittedAt:new Date().toISOString() };
+      defect.atr = { summary:body.summary, submittedAt:new Date().toISOString(), media:body.media, lat:body.lat, lng:body.lng, accuracyMeters:body.accuracyMeters };
       defect.status = 'ATR Submitted';
       return defect;
     });
     if (!updated) return res.status(409).json({ error:'This defect cannot accept an ATR from this Maker.' });
     await log(req.user!, 'SUBMITTED_ATR', 'Defect', updated.id, body.summary);
+    await notify(updated.checkerId, 'ATR awaiting verification', `${updated.id} has geo-tagged rectification evidence.`, 'approval');
     res.json(updated);
   });
   app.post('/api/defects/:id/verify-atr', auth, allow('checker'), async (req, res) => {
-    const body = z.object({ decision:z.enum(['verify','rework']) }).parse(req.body);
+    const body = z.object({ decision:z.enum(['verify','rework']), note:z.string().default('') }).parse(req.body);
     const updated = await store.mutate((data) => {
       const defect = data.defects.find((d) => d.id === req.params.id && d.checkerId === req.user!.id && d.status === 'ATR Submitted' && d.atr);
       if (!defect) return null;
       defect.status = body.decision === 'verify' ? 'Resolved':'Reopened';
+      defect.atr!.checkerNote = body.note;
       if (body.decision === 'verify') defect.atr!.verifiedAt = new Date().toISOString();
       return defect;
     });
     if (!updated) return res.status(409).json({ error:'ATR is not ready for verification.' });
     await log(req.user!, body.decision === 'verify' ? 'VERIFIED_ATR':'RETURNED_ATR', 'Defect', updated.id, `Checker decision: ${body.decision}.`);
+    await notify(updated.makerId, body.decision === 'verify' ? 'ATR verified' : 'ATR returned for rework', `${updated.id} is now ${updated.status}.`, 'status');
+    await notify(updated.reporterId, body.decision === 'verify' ? 'Issue resolved' : 'Repair requires more work', `${updated.id} is now ${updated.status}.`, 'status');
+    res.json(updated);
+  });
+  app.post('/api/defects/:id/feedback', auth, allow('citizen'), async (req, res) => {
+    const body = z.object({ rating:z.number().int().min(1).max(5), comment:z.string().max(500).default(''), reopen:z.boolean().default(false) }).parse(req.body);
+    const updated = await store.mutate((data) => {
+      const defect = data.defects.find((item) => item.id === req.params.id && item.tenantId === req.user!.tenantId && item.reporterId === req.user!.id && ['Resolved','Closed'].includes(item.status));
+      if (!defect) return null;
+      defect.feedback = { rating:body.rating, comment:body.comment, submittedAt:new Date().toISOString(), reopened:body.reopen };
+      defect.status = body.reopen ? 'Reopened' : 'Closed';
+      return defect;
+    });
+    if (!updated) return res.status(409).json({ error:'Feedback is available only for your resolved reports.' });
+    await log(req.user!, body.reopen ? 'REOPENED_CITIZEN_DEFECT':'CLOSED_CITIZEN_DEFECT', 'Defect', updated.id, `Citizen feedback: ${body.rating}/5.`);
+    if (body.reopen) await notify(updated.makerId, 'Citizen reopened defect', `${updated.id} requires another rectification cycle.`, 'assignment');
     res.json(updated);
   });
 
@@ -372,6 +504,42 @@ export function createApp() {
   });
   app.get('/api/activities', auth, async (req, res) => res.json(tenantScope((await store.all()).activities, req.user!)));
 
+  app.get('/api/sync/conflicts', auth, async (req, res) => {
+    const data = await store.all();
+    res.json(data.syncConflicts.filter((item) => item.tenantId === req.user!.tenantId && (req.user!.role === 'authority' || req.user!.role === 'checker' || item.userId === req.user!.id)));
+  });
+  app.post('/api/sync', auth, allow('maker','checker'), async (req, res) => {
+    const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
+    const result = await store.mutate((data) => {
+      const applied:string[] = [];
+      const conflicts = [];
+      for (const operation of body.operations) {
+        const lastServerEvent = data.activities.find((entry) => entry.entityId === operation.entityId);
+        const serverUpdatedAt = lastServerEvent?.timestamp ?? '1970-01-01T00:00:00.000Z';
+        if (new Date(operation.clientUpdatedAt) < new Date(serverUpdatedAt)) {
+          const conflict = { id:id('conflict'), tenantId:req.user!.tenantId!, userId:req.user!.id, entityType:operation.entityType, entityId:operation.entityId, clientUpdatedAt:operation.clientUpdatedAt, serverUpdatedAt, clientPayload:operation.payload, status:'Manual review' as const, createdAt:new Date().toISOString() };
+          data.syncConflicts.unshift(conflict);
+          conflicts.push(conflict);
+          continue;
+        }
+        if (operation.entityType === 'Inspection') {
+          const inspection = data.inspections.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
+          const parsed = z.object({ status:z.enum(['Accepted','Rejected','Not Ready','In Progress','Paused','Completed']).optional(), checklist:z.array(z.object({item:z.string(),status:z.enum(['Pending','Pass','Flag']),note:z.string().optional()})).optional() }).safeParse(operation.payload);
+          if (inspection && parsed.success) { Object.assign(inspection, parsed.data, { offlineState:'Synced' as const }); applied.push(operation.entityId); }
+        }
+        if (operation.entityType === 'Defect') {
+          const defect = data.defects.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
+          const parsed = z.object({ status:z.enum(['In Progress','Reopened']).optional() }).safeParse(operation.payload);
+          if (defect && parsed.success) { Object.assign(defect, parsed.data); applied.push(operation.entityId); }
+        }
+      }
+      return { applied, conflicts };
+    });
+    for (const entityId of result.applied) await log(req.user!, 'SYNCED_OFFLINE_CHANGE', 'OfflineOperation', entityId, 'Applied after reconnect using server-timestamp conflict rules.');
+    for (const conflict of result.conflicts) await log(req.user!, 'QUEUED_SYNC_CONFLICT', conflict.entityType, conflict.entityId, 'Client edit is older than the server state and requires manual review.');
+    res.json(result);
+  });
+
   app.get('/api/search', auth, async (req, res) => {
     const query = String(req.query.q ?? '').trim().toLowerCase();
     if (query.length < 2) return res.json([]);
@@ -379,6 +547,8 @@ export function createApp() {
     const result = [
       ...tenantScope(data.projects, req.user!).map((p) => ({ type:'Project', id:p.id, title:p.name, subtitle:`${p.code} · ${p.location}` })),
       ...tenantScope(data.assets, req.user!).map((a) => ({ type:'Asset', id:a.id, title:a.name, subtitle:`${a.type} · ${a.location}` })),
+      ...tenantScope(data.gisLayers, req.user!).map((layer) => ({ type:'GIS Layer', id:layer.id, title:layer.name, subtitle:`${layer.source} · v${layer.version} · ${layer.status}` })),
+      ...tenantScope(data.inspections, req.user!).map((inspection) => ({ type:'Inspection', id:inspection.id, title:`${inspection.type} inspection`, subtitle:`${inspection.assetId} · ${inspection.status}` })),
       ...visibleToUser(data.defects, req.user!).map((d) => ({ type:'Defect', id:d.id, title:d.title, subtitle:`${d.id} · ${d.status}` })),
       ...visibleToUser(data.tickets, req.user!).map((t) => ({ type:'Helpdesk', id:t.id, title:t.subject, subtitle:`${t.id} · ${t.status}` })),
       ...tenantScope(data.users.map((u) => ({ ...u, tenantId:u.tenantId })), req.user!).map((u) => ({ type:'User', id:u.id, title:u.name, subtitle:`${u.designation} · ${u.role}` })),

@@ -2,6 +2,55 @@ export type Role = 'tenant_admin' | 'authority' | 'maker' | 'checker' | 'citizen
 
 export type StatusTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
+export type GeoJsonGeometry =
+  | { type: 'Point'; coordinates: [number, number] }
+  | { type: 'LineString'; coordinates: [number, number][] }
+  | { type: 'MultiLineString'; coordinates: [number, number][][] }
+  | { type: 'Polygon'; coordinates: [number, number][][] }
+  | { type: 'MultiPolygon'; coordinates: [number, number][][][] };
+
+export interface GeoJsonFeature {
+  type: 'Feature';
+  id?: string;
+  geometry: GeoJsonGeometry;
+  properties: Record<string, string | number | boolean | null>;
+}
+
+export interface GeoJsonFeatureCollection {
+  type: 'FeatureCollection';
+  features: GeoJsonFeature[];
+}
+
+export interface GisLayer {
+  id: string;
+  tenantId: string;
+  projectId: string | null;
+  name: string;
+  description: string;
+  source: 'System' | 'Mappls mGIS' | 'KML' | 'GeoJSON' | 'Shapefile';
+  geometryType: 'Point' | 'Line' | 'Polygon' | 'Mixed';
+  status: 'Published' | 'Draft' | 'Processing' | 'Invalid';
+  version: number;
+  visible: boolean;
+  style: { color: string; width: number; opacity: number };
+  featureCollection: GeoJsonFeatureCollection;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeofenceResult {
+  within: boolean;
+  distanceMeters: number;
+  radiusMeters: number;
+  sourceType: 'Project' | 'Asset';
+  sourceId: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -47,6 +96,9 @@ export interface Project {
   makerIds: string[];
   checkerIds: string[];
   milestones: { name: string; due: string; done: boolean }[];
+  center: GeoPoint;
+  geofenceRadiusMeters: number;
+  documents: { id: string; name: string; category: string; uploadedAt: string }[];
 }
 
 export interface Asset {
@@ -59,6 +111,8 @@ export interface Asset {
   condition: 'Good' | 'Fair' | 'Attention' | 'Critical';
   attributes: Record<string, string>;
   lastInspected: string;
+  geometry: GeoJsonGeometry;
+  layerId: string | null;
 }
 
 export interface AttendanceRecord {
@@ -111,7 +165,10 @@ export interface Defect {
   createdAt: string;
   dueAt: string;
   media: string[];
-  atr?: { summary: string; submittedAt: string; verifiedAt?: string };
+  geofence: GeofenceResult | null;
+  locationAccuracyMeters?: number;
+  atr?: { summary: string; submittedAt: string; media: string[]; lat: number; lng: number; accuracyMeters?: number; verifiedAt?: string; checkerNote?: string };
+  feedback?: { rating: number; comment: string; submittedAt: string; reopened: boolean };
 }
 
 export interface Payment {
@@ -166,6 +223,19 @@ export interface Activity {
   detail: string;
 }
 
+export interface SyncConflict {
+  id: string;
+  tenantId: string;
+  userId: string;
+  entityType: 'Attendance' | 'Inspection' | 'Defect';
+  entityId: string;
+  clientUpdatedAt: string;
+  serverUpdatedAt: string;
+  clientPayload: Record<string, unknown>;
+  status: 'Manual review';
+  createdAt: string;
+}
+
 export interface StoreData {
   users: User[];
   tenants: Tenant[];
@@ -178,6 +248,17 @@ export interface StoreData {
   tickets: HelpdeskTicket[];
   notifications: Notification[];
   activities: Activity[];
+  gisLayers: GisLayer[];
+  syncConflicts: SyncConflict[];
+}
+
+export interface GisOverview {
+  configured: boolean;
+  provider: 'Mappls';
+  layers: GisLayer[];
+  assets: Asset[];
+  defects: Defect[];
+  projects: Project[];
 }
 
 export interface Session {

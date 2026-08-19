@@ -1,0 +1,20 @@
+import { useMemo, useState } from 'react';
+import { CheckCircle2, Crosshair, Layers3, MapPinned, Network, RadioTower } from 'lucide-react';
+import type { Defect, GisOverview } from '../../shared/types';
+import { Badge, Card, Loading, SectionHeader } from '../components/UI';
+import MapplsMap from '../components/MapplsMap';
+import { ErrorBanner, toneFor, useData } from './shared';
+
+export default function GisPage() {
+  const {data,loading,error}=useData<GisOverview>('/api/gis/overview',{configured:false,provider:'Mappls',layers:[],assets:[],defects:[],projects:[]});
+  const [severity,setSeverity]=useState('All');
+  const [selected,setSelected]=useState<Defect|null>(null);
+  const defects=useMemo(()=>data.defects.filter((defect)=>severity==='All'||defect.severity===severity),[data.defects,severity]);
+  if(loading)return <Loading label="Loading Mappls GIS workspace"/>;
+  return <div className="page-stack"><ErrorBanner message={error}/><SectionHeader eyebrow="MAPPLS MAP + GIS OPERATIONS" title="Infrastructure Network Map" description="View defects, assets, project geofences and published network geometry together in one tenant-scoped operational map."/>
+    <div className="gis-kpis"><Card><Network/><span><b>{data.layers.length}</b> Published network layers</span></Card><Card><MapPinned/><span><b>{data.assets.length}</b> Spatial assets</span></Card><Card><Crosshair/><span><b>{data.defects.filter((d)=>d.geofence?.within).length}</b> Geo-verified defects</span></Card><Card><RadioTower/><span><b>{data.configured?'Connected':'Credential pending'}</b> Mappls vector basemap</span></Card></div>
+    <Card className="gis-toolbar"><div><Layers3/><b>Defect severity</b>{['All','Critical','High','Medium','Low'].map((item)=><button key={item} className={severity===item?'active':''} onClick={()=>setSeverity(item)}>{item}</button>)}</div><span>{defects.length} visible defects · {data.layers.reduce((sum,layer)=>sum+layer.featureCollection.features.length,0)} network features</span></Card>
+    <div className="gis-workspace"><MapplsMap layers={data.layers} assets={data.assets} defects={defects} projects={data.projects.filter((project)=>data.layers.some((layer)=>layer.projectId===project.id)||defects.some((defect)=>defect.projectId===project.id))} focus={selected?{lat:selected.lat,lng:selected.lng}:null}/><aside><header><Layers3/><div><b>Operational layers</b><span>Tenant-scoped GIS catalogue</span></div></header>{data.layers.map((layer)=><button className="layer-row" key={layer.id}><i style={{background:layer.style.color}}/><span><b>{layer.name}</b><small>{layer.source} · v{layer.version} · {layer.featureCollection.features.length} features</small></span><Badge tone={toneFor(layer.status)}>{layer.status}</Badge></button>)}<header><MapPinned/><div><b>Defects on map</b><span>Select to focus location</span></div></header><div className="mapped-defects">{defects.map((defect)=><button key={defect.id} className={selected?.id===defect.id?'active':''} onClick={()=>setSelected(defect)}><span className={`severity-dot ${defect.severity.toLowerCase()}`}/><div><b>{defect.id} · {defect.title}</b><small>{defect.location}</small></div><Badge tone={toneFor(defect.status)}>{defect.status}</Badge></button>)}</div></aside></div>
+    {selected&&<Card className="map-selection"><div><span className={`selection-pin ${selected.severity.toLowerCase()}`}><MapPinned/></span><div><small>{selected.id} · {selected.source}</small><h2>{selected.title}</h2><p>{selected.description}</p></div></div><dl><div><dt>Coordinates</dt><dd>{selected.lat.toFixed(6)}, {selected.lng.toFixed(6)}</dd></div><div><dt>Geofence</dt><dd>{selected.geofence?<><CheckCircle2/> {selected.geofence.within?'Within':'Outside'} {selected.geofence.sourceType.toLowerCase()} scope · {selected.geofence.distanceMeters} m</>:'No linked scope'}</dd></div><div><dt>Underlying asset</dt><dd>{data.assets.find((asset)=>asset.id===selected.assetId)?.name||'Unlinked'}</dd></div><div><dt>Network layer</dt><dd>{data.layers.find((layer)=>layer.id===data.assets.find((asset)=>asset.id===selected.assetId)?.layerId)?.name||'No published layer'}</dd></div></dl></Card>}
+  </div>;
+}

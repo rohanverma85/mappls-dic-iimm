@@ -4,6 +4,7 @@ import Dashboard from './Dashboard';
 import { ActivityPage, NotificationsPage, ReportsPage, SearchPage } from './Governance';
 import { AssetsPage, OnboardingPage, ProjectsPage, TenantsPage, UsersPage } from './Operations';
 import { AttendancePage, CitizenPage, DefectsPage, HelpdeskPage, InspectionsPage, PaymentsPage } from './Workflows';
+import GisPage from './Gis';
 
 export default function Workspace({session,page,navigate}:{session:Session;page:AppPage;navigate:(p:AppPage)=>void}) {
   switch(page){
@@ -13,6 +14,7 @@ export default function Workspace({session,page,navigate}:{session:Session;page:
     case 'users':return <UsersPage session={session}/>;
     case 'projects':return <ProjectsPage session={session}/>;
     case 'assets':return <AssetsPage session={session}/>;
+    case 'gis':return <GisPage/>;
     case 'attendance':return <AttendancePage session={session}/>;
     case 'inspections':return <InspectionsPage session={session}/>;
     case 'defects':return <DefectsPage session={session}/>;

@@ -59,4 +59,63 @@ describe('IIMM API', () => {
     expect(result.body.checkerValidation).toBe('Approved');
     expect(result.body.status).toBe('Assigned');
   });
+
+  it('computes attendance geofences on the server and ignores client claims', async () => {
+    const maker = await login('usr-maker-1');
+    const result = await request(app).post('/api/attendance').set(auth(maker)).send({
+      projectId:'prj-1', lat:28.6139, lng:77.2090, accuracyMeters:7, withinGeofence:true,
+    }).expect(201);
+    expect(result.body.withinGeofence).toBe(false);
+    expect(result.body.status).toBe('Out of radius');
+  });
+
+  it('returns tenant-scoped GIS layers, assets, projects and defects', async () => {
+    const authority = await login('usr-auth-1');
+    const result = await request(app).get('/api/gis/overview').set(auth(authority)).expect(200);
+    expect(result.body.provider).toBe('Mappls');
+    expect(result.body.layers).toHaveLength(1);
+    expect(result.body.layers[0].id).toBe('layer-nh44');
+    expect(result.body.layers.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
+    expect(result.body.assets.every((item:{tenantId:string}) => item.tenantId === 'tenant-nhai')).toBe(true);
+  });
+
+  it('runs citizen validation, field rectification, ATR verification and citizen closure', async () => {
+    const citizen = await login('usr-citizen-1');
+    const maker = await login('usr-maker-2');
+    const checker = await login('usr-checker-2');
+    await request(app).post('/api/defects/CIT-8842/validate').set(auth(checker)).send({decision:'approve',makerId:'usr-maker-2',projectId:'prj-3'}).expect(200);
+    await request(app).post('/api/defects/CIT-8842/start').set(auth(maker)).expect(200);
+    const atr = await request(app).post('/api/defects/CIT-8842/atr').set(auth(maker)).send({summary:'Waterproofed the wall and replaced the damaged sealant.',media:['atr-waterproofing.jpg'],lat:28.6139,lng:77.2090,accuracyMeters:6}).expect(200);
+    expect(atr.body.status).toBe('ATR Submitted');
+    expect(atr.body.atr.lat).toBe(28.6139);
+    const verified = await request(app).post('/api/defects/CIT-8842/verify-atr').set(auth(checker)).send({decision:'verify',note:'Site evidence and repair verified.'}).expect(200);
+    expect(verified.body.status).toBe('Resolved');
+    const closed = await request(app).post('/api/defects/CIT-8842/feedback').set(auth(citizen)).send({rating:5,comment:'The seepage has stopped.',reopen:false}).expect(200);
+    expect(closed.body.status).toBe('Closed');
+    expect(closed.body.feedback.rating).toBe(5);
+  });
+
+  it('queues stale offline edits for manual review instead of dropping them', async () => {
+    const maker = await login('usr-maker-1');
+    const result = await request(app).post('/api/sync').set(auth(maker)).send({operations:[{
+      entityType:'Defect', entityId:'DEF-2287', clientUpdatedAt:'2020-01-01T00:00:00.000Z', payload:{status:'In Progress'},
+    }]}).expect(200);
+    expect(result.body.applied).toEqual([]);
+    expect(result.body.conflicts).toHaveLength(1);
+    expect(result.body.conflicts[0].status).toBe('Manual review');
+    const conflicts = await request(app).get('/api/sync/conflicts').set(auth(maker)).expect(200);
+    expect(conflicts.body).toHaveLength(1);
+  });
+
+  it('blocks field inspection completion while checklist items remain pending', async () => {
+    const maker = await login('usr-maker-1');
+    await request(app).patch('/api/inspections/INS-1140').set(auth(maker)).send({status:'Completed'}).expect(404);
+    const completed = await request(app).patch('/api/inspections/INS-1140').set(auth(maker)).send({
+      status:'Completed', checklist:[
+        {item:'Expansion joints',status:'Pass'}, {item:'Deck surface',status:'Pass'},
+        {item:'Bearings',status:'Pass'}, {item:'Parapets',status:'Flag',note:'Minor repair required'},
+      ],
+    }).expect(200);
+    expect(completed.body.status).toBe('Completed');
+  });
 });

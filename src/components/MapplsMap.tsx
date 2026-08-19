@@ -1,0 +1,128 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Layers3, LocateFixed, MapPinned, ShieldAlert } from 'lucide-react';
+import type { Asset, Defect, GeoJsonFeature, GeoJsonGeometry, GisLayer, Project } from '../../shared/types';
+import { api } from '../api';
+
+interface MapplsConfig {
+  provider: 'Mappls';
+  configured: boolean;
+  accessToken: string | null;
+  sdkVersion: string;
+  layer: string;
+}
+
+interface Props {
+  layers?: GisLayer[];
+  assets?: Asset[];
+  defects?: Defect[];
+  projects?: Project[];
+  focus?: { lat:number; lng:number } | null;
+  compact?: boolean;
+  className?: string;
+}
+
+type MapplsGlobal = {
+  Map: new (id:string, options:Record<string,unknown>) => { on?:(event:string,callback:()=>void)=>void; remove?:()=>void };
+  addGeoJson?: new (options:Record<string,unknown>) => unknown;
+  Marker?: new (options:Record<string,unknown>) => unknown;
+  Circle?: new (options:Record<string,unknown>) => unknown;
+};
+
+declare global { interface Window { mappls?: MapplsGlobal; Mappls?: MapplsGlobal } }
+
+let sdkPromise: Promise<MapplsGlobal> | null = null;
+function loadMappls(accessToken:string, version:string) {
+  if (window.mappls || window.Mappls) return Promise.resolve((window.mappls || window.Mappls)!);
+  if (sdkPromise) return sdkPromise;
+  sdkPromise = new Promise((resolve,reject) => {
+    const callback = `iimmMapplsReady${Date.now()}`;
+    (window as unknown as Record<string,unknown>)[callback] = () => {
+      const sdk = window.mappls || window.Mappls;
+      if (sdk) resolve(sdk); else reject(new Error('Mappls SDK loaded without a map object.'));
+      delete (window as unknown as Record<string,unknown>)[callback];
+    };
+    const script = document.createElement('script');
+    script.src = `https://sdk.mappls.com/map/sdk/web?v=${encodeURIComponent(version)}&access_token=${encodeURIComponent(accessToken)}&layer=vector&callback=${callback}`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error('Unable to load the Mappls Web Maps SDK.'));
+    document.head.appendChild(script);
+  });
+  return sdkPromise;
+}
+
+function styledCollection(layer:GisLayer) {
+  return {
+    ...layer.featureCollection,
+    features:layer.featureCollection.features.map((feature) => ({
+      ...feature,
+      properties:{ ...feature.properties, stroke:layer.style.color, 'stroke-width':layer.style.width, 'stroke-opacity':layer.style.opacity, fill:layer.style.color, 'fill-opacity':Math.min(layer.style.opacity,0.28) },
+    })),
+  };
+}
+
+export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],focus=null,compact=false,className=''}:Props) {
+  const id = useRef(`mappls-${Math.random().toString(36).slice(2)}`);
+  const mapRef = useRef<{remove?:()=>void}|null>(null);
+  const [config,setConfig] = useState<MapplsConfig|null>(null);
+  const [state,setState] = useState<'loading'|'live'|'fallback'|'error'>('loading');
+  const center = focus ?? projects[0]?.center ?? (defects[0] ? {lat:defects[0].lat,lng:defects[0].lng} : {lat:28.6139,lng:77.2090});
+
+  useEffect(()=>{ api<MapplsConfig>('/api/mappls/config').then(setConfig).catch(()=>setState('fallback')); },[]);
+  useEffect(()=>{
+    if (!config) return;
+    if (!config.configured || !config.accessToken) { setState('fallback'); return; }
+    let disposed=false;
+    loadMappls(config.accessToken,config.sdkVersion).then((sdk)=>{
+      if(disposed)return;
+      const map = new sdk.Map(id.current,{center:[center.lat,center.lng],zoom:compact?16:14,zoomControl:true,location:true});
+      mapRef.current=map;
+      const draw=()=>{
+        layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:0}); });
+        defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
+        projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
+        setState('live');
+      };
+      if(map.on)map.on('load',draw);else draw();
+    }).catch(()=>setState('error'));
+    return()=>{disposed=true;mapRef.current?.remove?.();mapRef.current=null;};
+  },[config,compact,center.lat,center.lng,layers,defects,projects]);
+
+  return <div className={`mappls-shell ${compact?'compact':''} ${className}`}>
+    {state!=='fallback'&&<div id={id.current} className="mappls-canvas"/>}
+    {(state==='fallback'||state==='error')&&<FallbackMap layers={layers} assets={assets} defects={defects} projects={projects} focus={focus}/>} 
+    <div className="map-provider"><span>mappls</span><b>{state==='live'?'LIVE MAP':state==='loading'?'CONNECTING':'GIS PREVIEW'}</b></div>
+    <div className="map-status"><Layers3/>{layers.filter((layer)=>layer.visible).length} network layer{layers.length===1?'':'s'}<i/><MapPinned/>{defects.length} defect{defects.length===1?'':'s'}</div>
+    {(state==='fallback'||state==='error')&&<div className="map-config-note"><ShieldAlert/><span><b>{state==='error'?'Mappls SDK unavailable':'Mappls access token required'}</b><small>The operational geometry remains usable; add a domain-whitelisted <code>MAPPLS_ACCESS_TOKEN</code> to enable the official vector basemap.</small></span></div>}
+  </div>;
+}
+
+function positions(geometry:GeoJsonGeometry):[number,number][] {
+  if(geometry.type==='Point')return [geometry.coordinates];
+  if(geometry.type==='LineString')return geometry.coordinates;
+  if(geometry.type==='MultiLineString'||geometry.type==='Polygon')return geometry.coordinates.flat();
+  return geometry.coordinates.flat(2) as [number,number][];
+}
+
+function FallbackMap({layers,assets,defects,projects,focus}:{layers:GisLayer[];assets:Asset[];defects:Defect[];projects:Project[];focus:{lat:number;lng:number}|null}) {
+  const features = useMemo(()=>[
+    ...layers.filter((layer)=>layer.visible).flatMap((layer)=>layer.featureCollection.features.map((feature)=>({feature,color:layer.style.color,width:layer.style.width}))),
+    ...assets.map((asset)=>({feature:{type:'Feature',id:asset.id,geometry:asset.geometry,properties:{}} as GeoJsonFeature,color:'#027a48',width:3})),
+  ],[layers,assets]);
+  const all = [...features.flatMap((item)=>positions(item.feature.geometry)),...defects.map((d)=>[d.lng,d.lat] as [number,number]),...projects.map((p)=>[p.center.lng,p.center.lat] as [number,number]),...(focus?[[focus.lng,focus.lat] as [number,number]]:[])];
+  const bounded = all.length ? all : [[77.19,28.59],[77.23,28.63]] as [number,number][];
+  const lngs=bounded.map((p)=>p[0]);const lats=bounded.map((p)=>p[1]);
+  const minLng=Math.min(...lngs),maxLng=Math.max(...lngs),minLat=Math.min(...lats),maxLat=Math.max(...lats);
+  const x=(lng:number)=>40+(lng-minLng)/Math.max(maxLng-minLng,0.0001)*720;
+  const y=(lat:number)=>360-(lat-minLat)/Math.max(maxLat-minLat,0.0001)*320;
+  const path=(geometry:GeoJsonGeometry)=>positions(geometry).map(([lng,lat],i)=>`${i?'L':'M'} ${x(lng)} ${y(lat)}`).join(' ')+(geometry.type.includes('Polygon')?' Z':'');
+  return <div className="mappls-fallback"><svg viewBox="0 0 800 400" role="img" aria-label="Infrastructure network and defect map">
+    <defs><pattern id="mapGrid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#c9d6e6" strokeWidth="1"/></pattern><filter id="pinShadow"><feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity=".25"/></filter></defs>
+    <rect width="800" height="400" fill="#edf3f8"/><rect width="800" height="400" fill="url(#mapGrid)"/>
+    <path d="M0 290 C150 250,235 320,390 270 S650 230,800 275" fill="none" stroke="#dbe8f1" strokeWidth="30"/><path d="M0 290 C150 250,235 320,390 270 S650 230,800 275" fill="none" stroke="#b8d6e8" strokeWidth="2"/>
+    {features.map((item,index)=><path key={`${item.feature.id||index}`} d={path(item.feature.geometry)} fill={item.feature.geometry.type.includes('Polygon')?`${item.color}33`:'none'} stroke={item.color} strokeWidth={item.width} strokeLinecap="round" strokeLinejoin="round"/>)}
+    {projects.map((project)=><g key={project.id}><circle cx={x(project.center.lng)} cy={y(project.center.lat)} r="34" fill="#10468512" stroke="#104685" strokeDasharray="6 5"/><text x={x(project.center.lng)+38} y={y(project.center.lat)-22}>{project.code}</text></g>)}
+    {defects.map((defect)=><g key={defect.id} transform={`translate(${x(defect.lng)},${y(defect.lat)})`} filter="url(#pinShadow)"><path d="M0 19C-13 4-16-4-16-12A16 16 0 1 1 16-12C16-4 13 4 0 19Z" fill={defect.severity==='Critical'?'#d92d20':defect.severity==='High'?'#f79009':'#104685'} stroke="white" strokeWidth="3"/><circle cy="-12" r="5" fill="white"/><title>{defect.id} · {defect.title}</title></g>)}
+    {focus&&<g transform={`translate(${x(focus.lng)},${y(focus.lat)})`}><circle r="22" fill="#1570ef22" stroke="#1570ef" strokeWidth="2"><animate attributeName="r" values="16;28;16" dur="2s" repeatCount="indefinite"/></circle><circle r="7" fill="#1570ef" stroke="white" strokeWidth="3"/></g>}
+  </svg><div className="fallback-compass"><LocateFixed/></div></div>;
+}

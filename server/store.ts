@@ -18,11 +18,49 @@ export class JsonStore {
   private async load() {
     await mkdir(dataDir, { recursive: true });
     try {
-      this.data = JSON.parse(await readFile(storePath, 'utf8')) as StoreData;
+      this.data = this.normalize(JSON.parse(await readFile(storePath, 'utf8')) as Partial<StoreData>);
     } catch {
       this.data = structuredClone(seedData);
       await this.persist();
     }
+  }
+
+  private normalize(input: Partial<StoreData>): StoreData {
+    const defaults = structuredClone(seedData);
+    const projects = (input.projects ?? defaults.projects).map((project) => {
+      const seeded = defaults.projects.find((item) => item.id === project.id);
+      return {
+        ...project,
+        center: project.center ?? seeded?.center ?? { lat:28.6139, lng:77.2090 },
+        geofenceRadiusMeters: project.geofenceRadiusMeters ?? seeded?.geofenceRadiusMeters ?? 250,
+        documents: project.documents ?? seeded?.documents ?? [],
+      };
+    });
+    const assets = (input.assets ?? defaults.assets).map((asset) => {
+      const seeded = defaults.assets.find((item) => item.id === asset.id);
+      const project = projects.find((item) => item.id === asset.projectId);
+      return {
+        ...asset,
+        geometry: asset.geometry ?? seeded?.geometry ?? { type:'Point' as const, coordinates:[project?.center.lng ?? 77.2090,project?.center.lat ?? 28.6139] },
+        layerId: asset.layerId ?? seeded?.layerId ?? null,
+      };
+    });
+    const defects = (input.defects ?? defaults.defects).map((defect) => ({
+      ...defect,
+      geofence: defect.geofence ?? null,
+      locationAccuracyMeters: defect.locationAccuracyMeters ?? undefined,
+      atr: defect.atr ?? undefined,
+      feedback: defect.feedback ?? undefined,
+    }));
+    return {
+      ...defaults,
+      ...input,
+      projects,
+      assets,
+      defects,
+      gisLayers: input.gisLayers ?? defaults.gisLayers,
+      syncConflicts: input.syncConflicts ?? [],
+    };
   }
 
   async all() {
