@@ -242,6 +242,8 @@ export interface HelpdeskTicket {
   status: 'Open' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed' | 'Reopened';
   createdAt: string;
   dueAt: string;
+  assignedTo?: string | null;
+  messages?: { id:string; by:string; text:string; at:string }[];
 }
 
 export interface Notification {

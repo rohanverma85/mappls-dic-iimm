@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { store } from './store.js';
 
-const app = createApp();
+const app = process.env.TEST_BASE_URL || createApp();
 
 async function login(userId:string) {
   const response = await request(app).post('/api/auth/login').send({ userId }).expect(200);
@@ -13,7 +13,7 @@ async function login(userId:string) {
 const auth = (token:string) => ({ Authorization:`Bearer ${token}` });
 
 describe('IIMM API', () => {
-  beforeEach(async () => { await store.reset(); });
+  beforeEach(async () => { if(typeof app==='string')await request(app).post('/api/dev/reset').expect(200);else await store.reset(); });
 
   it('returns a healthy service and seeded role accounts', async () => {
     await request(app).get('/api/health').expect(200).expect(({body}) => expect(body.ok).toBe(true));

@@ -1,11 +1,11 @@
 import { useEffect, useState, type PropsWithChildren } from 'react';
-import { Bell, Building2, ChevronDown, CircleHelp, ClipboardCheck, Construction, CreditCard, FileBarChart, FolderKanban, Gauge, Landmark, LogOut, MapPinned, Menu, PackageSearch, PanelLeftClose, Search, Settings2, ShieldCheck, Smartphone, UserCog, Users, Wrench, X } from 'lucide-react';
+import { Bell, Building2, ChevronDown, CircleHelp, ClipboardCheck, CloudCog, Construction, CreditCard, FileBarChart, FolderKanban, Gauge, Landmark, LogOut, MapPinned, Menu, PackageSearch, PanelLeftClose, Search, Settings2, ShieldCheck, Smartphone, UserCog, Users, Wrench, X } from 'lucide-react';
 import type { Role, Session } from '../../shared/types';
 import { ROLE_LABELS } from '../../shared/types';
 import { api } from '../api';
 import { Logo } from './Logo';
 
-export type AppPage = 'dashboard'|'tenants'|'onboarding'|'users'|'projects'|'assets'|'gis'|'attendance'|'inspections'|'defects'|'payments'|'citizen'|'helpdesk'|'reports'|'notifications'|'activity'|'search';
+export type AppPage = 'dashboard'|'tenants'|'onboarding'|'users'|'projects'|'assets'|'gis'|'attendance'|'inspections'|'defects'|'payments'|'citizen'|'helpdesk'|'reports'|'notifications'|'activity'|'search'|'sync';
 
 const navByRole: Record<Role, { group:string; items:{page:AppPage; label:string; icon:typeof Gauge}[] }[]> = {
   tenant_admin:[
@@ -15,15 +15,15 @@ const navByRole: Record<Role, { group:string; items:{page:AppPage; label:string;
   authority:[
     {group:'OPERATIONS',items:[{page:'dashboard',label:'Operations dashboard',icon:Gauge},{page:'projects',label:'Projects',icon:FolderKanban},{page:'assets',label:'Assets',icon:PackageSearch},{page:'gis',label:'Map & GIS',icon:MapPinned},{page:'inspections',label:'Inspections',icon:ClipboardCheck},{page:'defects',label:'Defects',icon:Construction},{page:'payments',label:'Payment approvals',icon:CreditCard}]},
     {group:'GOVERNANCE',items:[{page:'users',label:'Users & access',icon:Users},{page:'citizen',label:'Citizen insights',icon:Smartphone},{page:'reports',label:'Reports',icon:FileBarChart},{page:'activity',label:'Activity log',icon:ShieldCheck}]},
-    {group:'TOOLS',items:[{page:'notifications',label:'Notifications',icon:Bell},{page:'search',label:'Search',icon:Search},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp}]},
+    {group:'TOOLS',items:[{page:'sync',label:'Offline sync review',icon:CloudCog},{page:'notifications',label:'Notifications',icon:Bell},{page:'search',label:'Search',icon:Search},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp}]},
   ],
   maker:[
     {group:'MY FIELD WORK',items:[{page:'dashboard',label:'My work',icon:Gauge},{page:'attendance',label:'Mark attendance',icon:UserCog},{page:'inspections',label:'Inspections',icon:ClipboardCheck},{page:'defects',label:'Defects & ATR',icon:Wrench},{page:'payments',label:'My payment claims',icon:CreditCard}]},
-    {group:'TOOLS',items:[{page:'assets',label:'Assigned assets',icon:PackageSearch},{page:'gis',label:'Field map',icon:MapPinned},{page:'notifications',label:'Notifications',icon:Bell},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp},{page:'search',label:'Search',icon:Search}]},
+    {group:'TOOLS',items:[{page:'assets',label:'Assigned assets',icon:PackageSearch},{page:'gis',label:'Field map',icon:MapPinned},{page:'sync',label:'Offline sync',icon:CloudCog},{page:'notifications',label:'Notifications',icon:Bell},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp},{page:'search',label:'Search',icon:Search}]},
   ],
   checker:[
     {group:'VERIFICATION',items:[{page:'dashboard',label:'Verification queue',icon:Gauge},{page:'inspections',label:'Inspections',icon:ClipboardCheck},{page:'defects',label:'Defect validation',icon:Construction},{page:'attendance',label:'Attendance oversight',icon:UserCog},{page:'payments',label:'Payment verification',icon:CreditCard}]},
-    {group:'TOOLS',items:[{page:'projects',label:'Assigned projects',icon:FolderKanban},{page:'gis',label:'GIS verification map',icon:MapPinned},{page:'reports',label:'Agency reports',icon:FileBarChart},{page:'notifications',label:'Notifications',icon:Bell},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp},{page:'search',label:'Search',icon:Search}]},
+    {group:'TOOLS',items:[{page:'projects',label:'Assigned projects',icon:FolderKanban},{page:'gis',label:'GIS verification map',icon:MapPinned},{page:'sync',label:'Offline sync review',icon:CloudCog},{page:'reports',label:'Agency reports',icon:FileBarChart},{page:'notifications',label:'Notifications',icon:Bell},{page:'helpdesk',label:'Helpdesk',icon:CircleHelp},{page:'search',label:'Search',icon:Search}]},
   ],
   citizen:[
     {group:'MY IIMM',items:[{page:'dashboard',label:'My overview',icon:Gauge},{page:'citizen',label:'Report an issue',icon:Smartphone},{page:'notifications',label:'Updates',icon:Bell},{page:'helpdesk',label:'Help & support',icon:CircleHelp}]},

@@ -52,12 +52,14 @@ export class JsonStore {
       atr: defect.atr ?? undefined,
       feedback: defect.feedback ?? undefined,
     }));
+    const tickets=(input.tickets??defaults.tickets).map((ticket)=>({...ticket,assignedTo:ticket.assignedTo??null,messages:ticket.messages??[{id:`msg-${ticket.id}`,by:ticket.raisedBy,text:ticket.description,at:ticket.createdAt}]}));
     return {
       ...defaults,
       ...input,
       projects,
       assets,
       defects,
+      tickets,
       gisLayers: input.gisLayers ?? defaults.gisLayers,
       gisImports: input.gisImports ?? [],
       syncConflicts: input.syncConflicts ?? [],

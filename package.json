@@ -1,6 +1,6 @@
 {
   "name": "mappls-dic-iimm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "audit:interactions": "node scripts/audit-interactions.mjs",
+    "check": "npm run typecheck && npm run audit:interactions && npm run test && npm run build"
   },
   "dependencies": {
     "@tmcw/togeojson": "^7.1.2",

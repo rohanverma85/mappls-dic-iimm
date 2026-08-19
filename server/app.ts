@@ -103,6 +103,12 @@ export function createApp() {
   app.use(express.json({ limit: '12mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'IIMM API', timestamp: new Date().toISOString() }));
+  app.get('/api/version', (_req, res) => res.json({
+    service:'IIMM Platform', version:'1.1.0',
+    commit:process.env.REPLIT_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local',
+    deployment:process.env.REPLIT_DEPLOYMENT_ID || null,
+    capabilities:['Interactive Mappls map','GIS overlays','Map location selection','Mappls reverse geocoding','KML/KMZ/Shapefile import','Offline conflict review'],
+  }));
 
   app.get('/api/demo-users', async (_req, res) => {
     const data = await store.all();
@@ -228,17 +234,18 @@ export function createApp() {
 
   app.get('/api/tenants', auth, allow('tenant_admin'), async (_req, res) => res.json((await store.all()).tenants));
   app.post('/api/tenants', auth, allow('tenant_admin'), async (req, res) => {
-    const body = z.object({ name:z.string().min(3), shortName:z.string().min(2).max(12), type:z.string().min(3), hierarchy:z.string().min(3), modules:z.array(z.string()).min(2), assetTypes:z.array(z.object({ name:z.string(), attributes:z.array(z.string()), checklist:z.array(z.string()) })), slas:z.object({Critical:z.number().int().min(1),High:z.number().int().min(1),Medium:z.number().int().min(1),Low:z.number().int().min(1)}).default({Critical:24,High:72,Medium:168,Low:360}), dataMigration:z.boolean().default(false) }).parse(req.body);
+    const body = z.object({ name:z.string().min(3), shortName:z.string().min(2).max(12), type:z.string().min(3), hierarchy:z.string().min(3), modules:z.array(z.string()).min(2), assetTypes:z.array(z.object({ name:z.string(), attributes:z.array(z.string()), checklist:z.array(z.string()) })), slas:z.object({Critical:z.number().int().min(1),High:z.number().int().min(1),Medium:z.number().int().min(1),Low:z.number().int().min(1)}).default({Critical:24,High:72,Medium:168,Low:360}), dataMigration:z.boolean().default(false), initialAdmin:z.object({name:z.string().min(2),email:z.string().email(),mobile:z.string().min(8),designation:z.string().min(2)}).optional() }).parse(req.body);
     const tenant = await store.mutate((data) => {
       const created = { id:id('tenant'), name:body.name, shortName:body.shortName, type:body.type, hierarchy:body.hierarchy, status:'Provisioning' as const, modules:Array.from(new Set(['Access & Onboarding','Project Management',...body.modules])), assetTypes:body.assetTypes.map((a) => ({ ...a, id:id('at') })), slas:body.slas, dataMigration:body.dataMigration, primaryColor:'#104685', users:0 };
       data.tenants.push(created);
+      if(body.initialAdmin){data.users.push({id:id('usr'),...body.initialAdmin,role:'authority',tenantId:created.id,active:true});created.users=1;}
       return created;
     });
     await log(req.user!, 'PROVISIONED_TENANT', 'Tenant', tenant.id, `Created ${tenant.name} with ${tenant.assetTypes.length} asset types.`);
     res.status(201).json(tenant);
   });
   app.patch('/api/tenants/:id', auth, allow('tenant_admin'), async (req, res) => {
-    const body = z.object({ status:z.enum(['Live','Provisioning','Requested','Inactive']).optional(), modules:z.array(z.string()).optional(), hierarchy:z.string().optional() }).parse(req.body);
+    const body = z.object({ status:z.enum(['Live','Provisioning','Requested','Inactive']).optional(), modules:z.array(z.string()).optional(), hierarchy:z.string().min(3).optional(), name:z.string().min(3).optional(), type:z.string().min(3).optional(), slas:z.object({Critical:z.number().int().min(1),High:z.number().int().min(1),Medium:z.number().int().min(1),Low:z.number().int().min(1)}).optional(), assetTypes:z.array(z.object({id:z.string(),name:z.string().min(2),attributes:z.array(z.string()),checklist:z.array(z.string())})).optional() }).parse(req.body);
     const updated = await store.mutate((data) => {
       const tenant = data.tenants.find((item) => item.id === req.params.id);
       if (!tenant) return null;
@@ -295,6 +302,12 @@ export function createApp() {
     await log(req.user!, 'CREATED_PROJECT', 'Project', created.id, `Created ${created.code} · ${created.name}.`);
     res.status(201).json(created);
   });
+  app.patch('/api/projects/:id', auth, allow('authority'), async (req,res)=>{
+    const body=z.object({name:z.string().min(3).optional(),location:z.string().min(3).optional(),status:z.enum(['Active','Pending','In Review','Overdue','Completed']).optional(),progress:z.number().int().min(0).max(100).optional(),makerIds:z.array(z.string()).optional(),checkerIds:z.array(z.string()).optional(),center:z.object({lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180)}).optional(),geofenceRadiusMeters:z.number().int().min(25).max(10_000).optional(),milestones:z.array(z.object({name:z.string().min(2),due:z.string(),done:z.boolean()})).optional(),documents:z.array(z.object({id:z.string(),name:z.string().min(2),category:z.string(),uploadedAt:z.string()})).optional()}).parse(req.body);
+    const updated=await store.mutate((data)=>{const project=data.projects.find((item)=>item.id===req.params.id&&item.tenantId===req.user!.tenantId);if(!project)return null;Object.assign(project,body);return project;});
+    if(!updated)return res.status(404).json({error:'Project not found in the active tenant.'});
+    await log(req.user!,'UPDATED_PROJECT','Project',updated.id,`Updated ${updated.code} status, progress or project records.`);res.json(updated);
+  });
 
   app.get('/api/assets', auth, async (req, res) => res.json(tenantScope((await store.all()).assets, req.user!)));
   app.post('/api/assets', auth, allow('authority'), async (req, res) => {
@@ -309,6 +322,12 @@ export function createApp() {
     if (!created) return res.status(404).json({ error:'Project not found in the active tenant.' });
     await log(req.user!, 'REGISTERED_ASSET', 'Asset', created.id, `Registered ${created.name}.`);
     res.status(201).json(created);
+  });
+  app.patch('/api/assets/:id',auth,allow('authority'),async(req,res)=>{
+    const body=z.object({name:z.string().min(3).optional(),location:z.string().optional(),condition:z.enum(['Good','Fair','Attention','Critical']).optional(),attributes:z.record(z.string()).optional(),geometry:geometrySchema.optional()}).parse(req.body);
+    const updated=await store.mutate((data)=>{const asset=data.assets.find((item)=>item.id===req.params.id&&item.tenantId===req.user!.tenantId);if(!asset)return null;Object.assign(asset,body);return asset;});
+    if(!updated)return res.status(404).json({error:'Asset not found in the active tenant.'});
+    await log(req.user!,'UPDATED_ASSET','Asset',updated.id,`Updated ${updated.name}.`);res.json(updated);
   });
 
   app.get('/api/gis/layers', auth, async (req, res) => res.json(tenantScope((await store.all()).gisLayers, req.user!)));
@@ -630,23 +649,28 @@ export function createApp() {
     const body = z.object({ category:z.string(), priority:z.enum(['Critical','High','Medium','Low']), subject:z.string().min(5), description:z.string().min(8) }).parse(req.body);
     const created = await store.mutate((data) => {
       const dueHours = body.priority === 'Critical' ? 4 : body.priority === 'High' ? 24 : body.priority === 'Medium' ? 72 : 168;
-      const ticket: HelpdeskTicket = { id:`HD-${Math.floor(1000+Math.random()*9000)}`, tenantId:req.user!.tenantId, raisedBy:req.user!.id, ...body, status:'Open', createdAt:new Date().toISOString(), dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString() };
+      const createdAt=new Date().toISOString();
+      const ticket: HelpdeskTicket = { id:`HD-${Math.floor(1000+Math.random()*9000)}`, tenantId:req.user!.tenantId, raisedBy:req.user!.id, ...body, status:'Open', createdAt, dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString(),assignedTo:null,messages:[{id:id('msg'),by:req.user!.id,text:body.description,at:createdAt}] };
       data.tickets.unshift(ticket);
       return ticket;
     });
     await log(req.user!, 'CREATED_TICKET', 'HelpdeskTicket', created.id, created.subject);
     res.status(201).json(created);
   });
-  app.patch('/api/tickets/:id', auth, allow('checker','authority','tenant_admin'), async (req, res) => {
-    const body = z.object({ status:z.enum(['Assigned','In Progress','Resolved','Closed','Reopened']) }).parse(req.body);
+  app.patch('/api/tickets/:id', auth, async (req, res) => {
+    const body = z.object({ status:z.enum(['Assigned','In Progress','Resolved','Closed','Reopened']).optional(),message:z.string().min(2).optional() }).refine((value)=>value.status||value.message,{message:'A status or message is required.'}).parse(req.body);
     const updated = await store.mutate((data) => {
       const ticket = data.tickets.find((t) => t.id === req.params.id && (req.user!.role === 'tenant_admin' || t.tenantId === req.user!.tenantId));
       if (!ticket) return null;
-      ticket.status = body.status;
+      const manager=['checker','authority','tenant_admin'].includes(req.user!.role);
+      if(body.status&&!manager&&!(ticket.raisedBy===req.user!.id&&body.status==='Reopened'))return null;
+      if(body.status)ticket.status=body.status;
+      if(body.status==='Assigned')ticket.assignedTo=req.user!.id;
+      if(body.message){ticket.messages??=[];ticket.messages.push({id:id('msg'),by:req.user!.id,text:body.message,at:new Date().toISOString()});}
       return ticket;
     });
     if (!updated) return res.status(404).json({ error:'Ticket not found' });
-    await log(req.user!, 'UPDATED_TICKET', 'HelpdeskTicket', updated.id, `Ticket moved to ${updated.status}.`);
+    await log(req.user!, 'UPDATED_TICKET', 'HelpdeskTicket', updated.id, body.status?`Ticket moved to ${updated.status}.`:'Added a support conversation update.');
     res.json(updated);
   });
 
@@ -655,12 +679,14 @@ export function createApp() {
     await store.mutate((data) => data.notifications.filter((n) => n.userId === req.user!.id).forEach((n) => { n.read = true; }));
     res.json({ ok:true });
   });
+  app.post('/api/notifications/:id/read',auth,async(req,res)=>{const updated=await store.mutate((data)=>{const item=data.notifications.find((candidate)=>candidate.id===req.params.id&&candidate.userId===req.user!.id);if(!item)return null;item.read=true;return item;});if(!updated)return res.status(404).json({error:'Notification not found.'});res.json(updated);});
   app.get('/api/activities', auth, async (req, res) => res.json(tenantScope((await store.all()).activities, req.user!)));
 
   app.get('/api/sync/conflicts', auth, async (req, res) => {
     const data = await store.all();
     res.json(data.syncConflicts.filter((item) => item.tenantId === req.user!.tenantId && (req.user!.role === 'authority' || req.user!.role === 'checker' || item.userId === req.user!.id)));
   });
+  app.post('/api/sync/conflicts/:id/resolve',auth,allow('checker','authority'),async(req,res)=>{const body=z.object({decision:z.enum(['keep-server','reviewed-client']),note:z.string().min(3)}).parse(req.body);const resolved=await store.mutate((data)=>{const index=data.syncConflicts.findIndex((item)=>item.id===req.params.id&&item.tenantId===req.user!.tenantId);if(index<0)return null;return data.syncConflicts.splice(index,1)[0];});if(!resolved)return res.status(404).json({error:'Sync conflict not found.'});await log(req.user!,'RESOLVED_SYNC_CONFLICT',resolved.entityType,resolved.entityId,`${body.decision}: ${body.note}`);res.json({ok:true,id:resolved.id});});
   app.post('/api/sync', auth, allow('maker','checker'), async (req, res) => {
     const body = z.object({ operations:z.array(z.object({ entityType:z.enum(['Inspection','Defect']), entityId:z.string(), clientUpdatedAt:z.string().datetime(), payload:z.record(z.unknown()) })).min(1).max(50) }).parse(req.body);
     const result = await store.mutate((data) => {
@@ -745,5 +771,10 @@ function reportCsv(type: string, data: StoreData, user: User) {
     const rows = tenantScope(data.activities,user).map((a) => [a.timestamp,a.actorRole,a.action,a.entityType,a.entityId,a.detail]);
     return [['Timestamp','Actor Role','Action','Entity','Entity ID','Detail'],...rows].map((row) => row.map(escape).join(',')).join('\n');
   }
+  if(type==='projects'){const rows=tenantScope(data.projects,user).map((p)=>[p.id,p.code,p.name,p.location,p.status,p.progress,p.milestones.filter((m)=>m.done).length,p.milestones.length,p.makerIds.length,p.checkerIds.length,p.geofenceRadiusMeters]);return [['ID','Code','Name','Location','Status','Progress %','Milestones Done','Milestones Total','Makers','Checkers','Geofence Metres'],...rows].map((row)=>row.map(escape).join(',')).join('\n');}
+  if(type==='assets'){const rows=tenantScope(data.assets,user).map((a)=>[a.id,a.name,a.type,a.location,a.condition,a.geometry.type,a.lastInspected,a.layerId]);return [['ID','Name','Type','Location','Condition','Geometry','Last Inspected','GIS Layer'],...rows].map((row)=>row.map(escape).join(',')).join('\n');}
+  if(type==='inspections'){const rows=tenantScope(data.inspections,user).map((i)=>[i.id,i.type,i.projectId,i.assetId,i.makerId,i.checkerId,i.scheduledAt,i.status,i.checklist.filter((c)=>c.status==='Pass').length,i.checklist.filter((c)=>c.status==='Flag').length,i.offlineState]);return [['ID','Type','Project','Asset','Maker','Checker','Scheduled','Status','Passed','Flagged','Offline State'],...rows].map((row)=>row.map(escape).join(',')).join('\n');}
+  if(type==='attendance'){const rows=tenantScope(data.attendance,user).map((a)=>[a.id,a.date,a.projectId,a.makerId,a.checkIn,a.checkOut,a.lat,a.lng,a.withinGeofence,a.status]);return [['ID','Date','Project','Maker','Check In','Check Out','Latitude','Longitude','Within Geofence','Status'],...rows].map((row)=>row.map(escape).join(',')).join('\n');}
+  if(type==='helpdesk'){const rows=tenantScope(data.tickets,user).map((t)=>[t.id,t.subject,t.category,t.priority,t.status,t.raisedBy,t.assignedTo,t.createdAt,t.dueAt,t.messages?.length??0]);return [['ID','Subject','Category','Priority','Status','Raised By','Assigned To','Created','Due','Messages'],...rows].map((row)=>row.map(escape).join(',')).join('\n');}
   return null;
 }

@@ -1,7 +1,7 @@
 import type { Session } from '../../shared/types';
 import type { AppPage } from '../components/Shell';
 import Dashboard from './Dashboard';
-import { ActivityPage, NotificationsPage, ReportsPage, SearchPage } from './Governance';
+import { ActivityPage, NotificationsPage, ReportsPage, SearchPage, SyncPage } from './Governance';
 import { AssetsPage, OnboardingPage, ProjectsPage, TenantsPage, UsersPage } from './Operations';
 import { AttendancePage, CitizenPage, DefectsPage, HelpdeskPage, InspectionsPage, PaymentsPage } from './Workflows';
 import GisPage from './Gis';
@@ -22,8 +22,9 @@ export default function Workspace({session,page,navigate}:{session:Session;page:
     case 'citizen':return <CitizenPage session={session}/>;
     case 'helpdesk':return <HelpdeskPage session={session}/>;
     case 'reports':return <ReportsPage/>;
-    case 'notifications':return <NotificationsPage/>;
+    case 'notifications':return <NotificationsPage navigate={navigate}/>;
     case 'activity':return <ActivityPage session={session}/>;
-    case 'search':return <SearchPage/>;
+    case 'search':return <SearchPage navigate={navigate}/>;
+    case 'sync':return <SyncPage session={session}/>;
   }
 }

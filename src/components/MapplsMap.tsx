@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layers3, LocateFixed, MapPinned, ShieldAlert } from 'lucide-react';
+import { Crosshair, Layers3, LocateFixed, MapPinned, ShieldAlert } from 'lucide-react';
 import type { Asset, Defect, GeoJsonFeature, GeoJsonGeometry, GisLayer, Project } from '../../shared/types';
 import { api } from '../api';
 
@@ -17,12 +17,21 @@ interface Props {
   defects?: Defect[];
   projects?: Project[];
   focus?: { lat:number; lng:number } | null;
+  selectedLocation?: { lat:number; lng:number } | null;
+  selectable?: boolean;
+  onLocationSelect?: (point:{lat:number;lng:number})=>void;
   compact?: boolean;
   className?: string;
 }
 
+type MapplsMapInstance = {
+  on?:(event:string,callback:(event?:unknown)=>void)=>void;
+  addListener?:(event:string,callback:(event?:unknown)=>void)=>unknown;
+  remove?:()=>void;
+};
+
 type MapplsGlobal = {
-  Map: new (id:string, options:Record<string,unknown>) => { on?:(event:string,callback:()=>void)=>void; remove?:()=>void };
+  Map: new (id:string, options:Record<string,unknown>) => MapplsMapInstance;
   addGeoJson?: new (options:Record<string,unknown>) => unknown;
   Marker?: new (options:Record<string,unknown>) => unknown;
   Circle?: new (options:Record<string,unknown>) => unknown;
@@ -61,12 +70,23 @@ function styledCollection(layer:GisLayer) {
   };
 }
 
-export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],focus=null,compact=false,className=''}:Props) {
+function pointFromMapEvent(event:unknown):{lat:number;lng:number}|null {
+  if(!event||typeof event!=='object')return null;
+  const value=event as Record<string,unknown>;
+  const candidate=(value.lngLat||value.latLng||value.latlng||value) as Record<string,unknown>;
+  const lat=Number(candidate?.lat ?? candidate?.latitude);
+  const lng=Number(candidate?.lng ?? candidate?.lon ?? candidate?.longitude);
+  if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng};
+  if(Array.isArray(value.lngLat)&&value.lngLat.length>=2)return {lng:Number(value.lngLat[0]),lat:Number(value.lngLat[1])};
+  return null;
+}
+
+export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],focus=null,selectedLocation=null,selectable=false,onLocationSelect,compact=false,className=''}:Props) {
   const id = useRef(`mappls-${Math.random().toString(36).slice(2)}`);
   const mapRef = useRef<{remove?:()=>void}|null>(null);
   const [config,setConfig] = useState<MapplsConfig|null>(null);
   const [state,setState] = useState<'loading'|'live'|'fallback'|'error'>('loading');
-  const center = focus ?? projects[0]?.center ?? (defects[0] ? {lat:defects[0].lat,lng:defects[0].lng} : {lat:28.6139,lng:77.2090});
+  const center = selectedLocation ?? focus ?? projects[0]?.center ?? (defects[0] ? {lat:defects[0].lat,lng:defects[0].lng} : {lat:28.6139,lng:77.2090});
 
   useEffect(()=>{ api<MapplsConfig>('/api/mappls/config').then(setConfig).catch(()=>setState('fallback')); },[]);
   useEffect(()=>{
@@ -79,19 +99,29 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
       mapRef.current=map;
       setState('live');
       const draw=()=>{
-        layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:0}); });
+        layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:1}); });
+        assets.forEach((asset)=>{
+          if(asset.geometry.type==='Point'&&sdk.Marker)new sdk.Marker({map,position:{lat:asset.geometry.coordinates[1],lng:asset.geometry.coordinates[0]},fitbounds:false,popupHtml:`<strong>${asset.name}</strong><br/>${asset.type}<br/>${asset.condition}`});
+          else if(sdk.addGeoJson)new sdk.addGeoJson({map,data:{type:'FeatureCollection',features:[{type:'Feature',geometry:asset.geometry,properties:{stroke:'#027a48','stroke-width':4,'stroke-opacity':0.9,fill:'#027a48','fill-opacity':0.2}}]},fitbounds:false,cType:1});
+        });
         defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
         projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
+        if(selectedLocation&&sdk.Marker)new sdk.Marker({map,position:selectedLocation,fitbounds:false,draggable:false,popupHtml:'<strong>Selected location</strong>'});
       };
       if(map.on)map.on('load',draw);else draw();
+      if(selectable&&onLocationSelect){
+        const select=(event?:unknown)=>{const point=pointFromMapEvent(event);if(point)onLocationSelect(point);};
+        if(map.addListener)map.addListener('click',select);else map.on?.('click',select);
+      }
     }).catch(()=>setState('error'));
     return()=>{disposed=true;mapRef.current?.remove?.();mapRef.current=null;};
-  },[config,compact,center.lat,center.lng,layers,defects,projects]);
+  },[config,compact,center.lat,center.lng,layers,assets,defects,projects,selectable,onLocationSelect,selectedLocation?.lat,selectedLocation?.lng]);
 
   return <div className={`mappls-shell ${compact?'compact':''} ${className}`}>
     {state!=='fallback'&&<div id={id.current} className="mappls-canvas"/>}
-    {(state==='fallback'||state==='error')&&<FallbackMap layers={layers} assets={assets} defects={defects} projects={projects} focus={focus}/>} 
+    {(state==='fallback'||state==='error')&&<FallbackMap layers={layers} assets={assets} defects={defects} projects={projects} focus={selectedLocation??focus} onSelect={selectable?onLocationSelect:undefined}/>}
     <div className="map-provider"><span>mappls</span><b>{state==='live'?'LIVE MAP':state==='loading'?'CONNECTING':'GIS PREVIEW'}</b></div>
+    {selectable&&<div className="map-select-note"><Crosshair/> Click the map to mark a location</div>}
     <div className="map-status"><Layers3/>{layers.filter((layer)=>layer.visible).length} network layer{layers.length===1?'':'s'}<i/><MapPinned/>{defects.length} defect{defects.length===1?'':'s'}</div>
     {(state==='fallback'||state==='error')&&<div className="map-config-note"><ShieldAlert/><span><b>{state==='error'?'Mappls SDK unavailable':'Mappls access token required'}</b><small>The operational geometry remains usable; add a domain-whitelisted <code>MAPPLS_ACCESS_TOKEN</code> to enable the official vector basemap.</small></span></div>}
   </div>;
@@ -104,7 +134,7 @@ function positions(geometry:GeoJsonGeometry):[number,number][] {
   return geometry.coordinates.flat(2) as [number,number][];
 }
 
-function FallbackMap({layers,assets,defects,projects,focus}:{layers:GisLayer[];assets:Asset[];defects:Defect[];projects:Project[];focus:{lat:number;lng:number}|null}) {
+function FallbackMap({layers,assets,defects,projects,focus,onSelect}:{layers:GisLayer[];assets:Asset[];defects:Defect[];projects:Project[];focus:{lat:number;lng:number}|null;onSelect?:((point:{lat:number;lng:number})=>void)}) {
   const features = useMemo(()=>[
     ...layers.filter((layer)=>layer.visible).flatMap((layer)=>layer.featureCollection.features.map((feature)=>({feature,color:layer.style.color,width:layer.style.width}))),
     ...assets.map((asset)=>({feature:{type:'Feature',id:asset.id,geometry:asset.geometry,properties:{}} as GeoJsonFeature,color:'#027a48',width:3})),
@@ -116,7 +146,8 @@ function FallbackMap({layers,assets,defects,projects,focus}:{layers:GisLayer[];a
   const x=(lng:number)=>40+(lng-minLng)/Math.max(maxLng-minLng,0.0001)*720;
   const y=(lat:number)=>360-(lat-minLat)/Math.max(maxLat-minLat,0.0001)*320;
   const path=(geometry:GeoJsonGeometry)=>positions(geometry).map(([lng,lat],i)=>`${i?'L':'M'} ${x(lng)} ${y(lat)}`).join(' ')+(geometry.type.includes('Polygon')?' Z':'');
-  return <div className="mappls-fallback"><svg viewBox="0 0 800 400" role="img" aria-label="Infrastructure network and defect map">
+  function select(event:React.MouseEvent<SVGSVGElement>){if(!onSelect)return;const box=event.currentTarget.getBoundingClientRect();const sx=(event.clientX-box.left)/box.width*800;const sy=(event.clientY-box.top)/box.height*400;onSelect({lng:minLng+(sx-40)/720*Math.max(maxLng-minLng,0.0001),lat:minLat+(360-sy)/320*Math.max(maxLat-minLat,0.0001)});}
+  return <div className="mappls-fallback"><svg viewBox="0 0 800 400" role="img" aria-label="Infrastructure network and defect map" onClick={select} className={onSelect?'selectable-map':''}>
     <defs><pattern id="mapGrid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#c9d6e6" strokeWidth="1"/></pattern><filter id="pinShadow"><feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity=".25"/></filter></defs>
     <rect width="800" height="400" fill="#edf3f8"/><rect width="800" height="400" fill="url(#mapGrid)"/>
     <path d="M0 290 C150 250,235 320,390 270 S650 230,800 275" fill="none" stroke="#dbe8f1" strokeWidth="30"/><path d="M0 290 C150 250,235 320,390 270 S650 230,800 275" fill="none" stroke="#b8d6e8" strokeWidth="2"/>
