@@ -101,27 +101,35 @@ struct NativeMap: View {
   let dataset: MapDataset
   @Binding var selected: MapMarker?
   var body: some View {
-    if mappls.ready {
-      MapplsRepresentable(dataset: dataset, selected: $selected)
-    } else {
+    if mappls.canAttemptMap {
       ZStack {
-        LinearGradient(colors: [.iimmSky, .iimmMist], startPoint: .top, endPoint: .bottom)
-        VStack(spacing: 13) {
-          IIMMSymbolTile(symbol: mappls.symbol, color: mappls.color)
-          Text(mappls.title).font(.title3.bold()).foregroundStyle(Color.iimmInk)
-          Text(mappls.detail).font(.subheadline).multilineTextAlignment(.center)
-            .foregroundStyle(.secondary).padding(.horizontal)
-          if case .loading = mappls.status { ProgressView().tint(Color.iimmBlue) }
+        MapplsRepresentable(dataset: dataset, selected: $selected, mappls: mappls)
+        if !mappls.ready {
+          sdkStatusCard
+            .background(LinearGradient(colors: [.iimmSky.opacity(0.94), .iimmMist.opacity(0.94)], startPoint: .top, endPoint: .bottom))
+            .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity).iimmCard().padding(22)
       }
+    } else {
+      sdkStatusCard.background(LinearGradient(colors: [.iimmSky, .iimmMist], startPoint: .top, endPoint: .bottom))
     }
+  }
+  private var sdkStatusCard: some View {
+    VStack(spacing: 13) {
+      IIMMSymbolTile(symbol: mappls.symbol, color: mappls.color)
+      Text(mappls.title).font(.title3.bold()).foregroundStyle(Color.iimmInk)
+      Text(mappls.detail).font(.subheadline).multilineTextAlignment(.center)
+        .foregroundStyle(.secondary).padding(.horizontal)
+      if case .loading = mappls.status { ProgressView().tint(Color.iimmBlue) }
+    }
+    .frame(maxWidth: .infinity).iimmCard().padding(22)
   }
 }
 
 struct MapplsRepresentable: UIViewRepresentable {
   let dataset: MapDataset
   @Binding var selected: MapMarker?
+  let mappls: MapplsSDKState
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> MapplsMapView {
     let view = MapplsMapView(frame: .zero)
@@ -155,9 +163,15 @@ struct MapplsRepresentable: UIViewRepresentable {
         .init(latitude: focus.lat, longitude: focus.lng), zoomLevel: 13, animated: true)
     }
   }
-  final class Coordinator: NSObject, MapplsMapViewDelegate {
+  @MainActor final class Coordinator: NSObject, @preconcurrency MapplsMapViewDelegate {
     var parent: MapplsRepresentable
     init(_ parent: MapplsRepresentable) { self.parent = parent }
+    func mapViewDidFinishLoadingMap(_ mapView: MGLMapView) {
+      parent.mappls.markMapReady()
+    }
+    func mapViewDidFailLoadingMap(_ mapView: MGLMapView, withError error: Error) {
+      parent.mappls.markMapFailed(error.localizedDescription)
+    }
     @objc func tap(_ sender: UITapGestureRecognizer) {
       guard let view = sender.view as? MapplsMapView else { return }
       let coordinate = view.convert(sender.location(in: view), toCoordinateFrom: view)

@@ -16,6 +16,7 @@ extension Color {
 @MainActor
 final class MapplsSDKState: ObservableObject {
   private let logger = Logger(subsystem: "com.mappls.dic.iimm", category: "Mappls")
+  private var preflightError: String?
   enum Status: Equatable { case missing, loading, ready, failed(String) }
   @Published private(set) var status: Status
 
@@ -30,20 +31,30 @@ final class MapplsSDKState: ObservableObject {
     MapplsMapAuthenticator.sharedManager().initializeSDKSession { [weak self] success, error in
       self?.logger.info("SDK authentication \(success ? "succeeded" : "failed", privacy: .public): \(error?.localizedDescription ?? "no error", privacy: .public)")
       DispatchQueue.main.async {
-        self?.status = success
-          ? .ready
-          : .failed(error?.localizedDescription ?? "The SDK rejected this app configuration.")
+        if success {
+          self?.status = .ready
+        } else {
+          self?.preflightError = error?.localizedDescription ?? "SDK preflight was rejected."
+        }
       }
     }
     Task { [weak self] in
-      try? await Task.sleep(for: .seconds(15))
+      try? await Task.sleep(for: .seconds(20))
       guard self?.status == .loading else { return }
-      self?.logger.error("SDK authentication timed out without a completion callback")
-      self?.status = .failed("SDK authentication timed out.")
+      let detail = self?.preflightError.map { "Map style did not finish loading. SDK preflight: \($0)" }
+        ?? "Map style did not finish loading."
+      self?.logger.error("\(detail, privacy: .public)")
+      self?.status = .failed(detail)
     }
   }
 
   var ready: Bool { status == .ready }
+  var canAttemptMap: Bool { status != .missing }
+  func markMapReady() { status = .ready }
+  func markMapFailed(_ message: String) {
+    guard status != .ready else { return }
+    status = .failed(message)
+  }
   var title: String {
     switch status {
     case .missing: "Map credentials required"
