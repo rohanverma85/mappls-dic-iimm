@@ -1,3 +1,4 @@
+modules = ["nodejs-20"]
 run = "npm start"
 entrypoint = "dist-server/server/server.js"
 
