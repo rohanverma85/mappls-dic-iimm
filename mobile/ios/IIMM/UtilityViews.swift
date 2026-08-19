@@ -113,6 +113,7 @@ struct MoreView: View {
         }
       }
       Section {
+        LabeledContent("Pending offline changes", value: "\(app.queue.all().count)")
         Button("Mark all notifications read") {
           Task { await app.mutate { _ = try await app.api.post("/api/notifications/read-all") } }
         }

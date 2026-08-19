@@ -24,6 +24,10 @@ class SessionStore(context: Context) {
     )
     fun token(): String? = prefs.getString("token", null)
     fun user(): User? = prefs.getString("user", null)?.let { User.from(JSONObject(it)) }
+    fun projectId(): String? = prefs.getString("last-project-id", null)
+    fun saveProjectId(projectId: String?) {
+        if (!projectId.isNullOrBlank()) prefs.edit().putString("last-project-id", projectId).apply()
+    }
     fun save(token: String, user: JSONObject) = prefs.edit().putString("token", token).putString("user", user.toString()).apply()
     fun clear() = prefs.edit().clear().apply()
 }
@@ -31,7 +35,13 @@ class SessionStore(context: Context) {
 class ApiClient(private val sessions: SessionStore) {
     private val base = BuildConfig.API_BASE_URL.trimEnd('/')
 
-    suspend fun array(path: String): JSONArray = request("GET", path) as JSONArray
+    suspend fun array(path: String): JSONArray {
+        val result = request("GET", path) as JSONArray
+        if (path == "/api/projects" && result.length() > 0) {
+            sessions.saveProjectId(result.optJSONObject(0)?.optString("id"))
+        }
+        return result
+    }
     suspend fun obj(path: String): JSONObject = request("GET", path) as JSONObject
     suspend fun post(path: String, body: JSONObject = JSONObject()): Any = request("POST", path, body)
     suspend fun patch(path: String, body: JSONObject): Any = request("PATCH", path, body)

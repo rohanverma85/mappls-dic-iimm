@@ -83,7 +83,46 @@ final class AppModel: ObservableObject {
   func syncQueued() async {
     let items = queue.all()
     guard !items.isEmpty, api.keys.token() != nil else { return }
-    let operations: [[String: Any]] = items.compactMap { item in
+    for item in items where ["DefectCreate", "DefectAtrCreate"].contains(item.entityType) {
+      do {
+        guard var payload = try JSONSerialization.jsonObject(with: item.payload) as? [String: Any] else { continue }
+        var mediaId = payload["mediaId"] as? String ?? ""
+        if mediaId.isEmpty {
+          guard let path = payload["evidencePath"] as? String else { continue }
+          let evidence = try Data(contentsOf: URL(fileURLWithPath: path))
+          let uploaded = try await api.upload(
+            data: evidence, mimeType: payload["mimeType"] as? String ?? "image/jpeg",
+            fileName: payload["fileName"] as? String ?? "offline-evidence.jpg",
+            lat: payload["lat"] as? Double ?? 0, lng: payload["lng"] as? Double ?? 0,
+            accuracyMeters: payload["locationAccuracyMeters"] as? Double ?? payload["accuracyMeters"] as? Double)
+          mediaId = uploaded["id"] as? String ?? ""
+        }
+        let lat = payload["lat"] as? Double ?? 0, lng = payload["lng"] as? Double ?? 0
+        if item.entityType == "DefectAtrCreate" {
+          _ = try await api.post("/api/defects/\(payload["defectId"] as? String ?? "")/atr", body: [
+            "summary": payload["summary"] as? String ?? "", "media": [mediaId], "lat": lat, "lng": lng,
+            "accuracyMeters": payload["accuracyMeters"] as? Double ?? 0,
+          ])
+          if let path = payload["evidencePath"] as? String { try? FileManager.default.removeItem(atPath: path) }
+          queue.remove([item.id])
+          continue
+        }
+        let location: String
+        if let storedLocation = payload["location"] as? String, !storedLocation.isEmpty {
+          location = storedLocation
+        } else {
+          location = (try? await api.reverse(lat: lat, lng: lng)) ?? "\(lat), \(lng)"
+        }
+        payload["location"] = location
+        payload["media"] = [mediaId]
+        ["mediaId", "evidencePath", "mimeType", "fileName"].forEach { payload.removeValue(forKey: $0) }
+        _ = try await api.post("/api/defects", body: payload)
+        if let path = (try JSONSerialization.jsonObject(with: item.payload) as? [String: Any])?["evidencePath"] as? String { try? FileManager.default.removeItem(atPath: path) }
+        queue.remove([item.id])
+      } catch { /* Preserve the deferred report and evidence for the next reconnect. */ }
+    }
+    let serverItems = queue.all().filter { !["DefectCreate", "DefectAtrCreate"].contains($0.entityType) }
+    let operations: [[String: Any]] = serverItems.compactMap { item in
       guard let payload = try? JSONSerialization.jsonObject(with: item.payload) as? [String: Any] else { return nil }
       return ["entityType": item.entityType, "entityId": item.entityId, "clientUpdatedAt": item.clientUpdatedAt, "payload": payload]
     }
@@ -91,7 +130,7 @@ final class AppModel: ObservableObject {
     do {
       let result = try await api.post("/api/sync", body: ["operations": operations]) as? [String: Any]
       let applied = Set(result?["applied"] as? [String] ?? [])
-      queue.remove(Set(items.filter { applied.contains($0.entityId) }.map(\.id)))
+      queue.remove(Set(serverItems.filter { applied.contains($0.entityId) }.map(\.id)))
     } catch { /* Work remains queued and is retried on the next reconnect. */ }
   }
   private func perform(_ block: @escaping () async throws -> Void) async {
@@ -128,6 +167,23 @@ final class OfflineQueue {
         id: UUID(), entityType: entityType, entityId: entityId,
         clientUpdatedAt: ISO8601DateFormatter().string(from: Date()), payload: data))
     save(items)
+  }
+  func enqueueDefect(entityId: String, payload: [String: Any], evidence: Data, mimeType: String, fileName: String) {
+    enqueueEvidence(entityType: "DefectCreate", entityId: entityId, payload: payload, evidence: evidence, mimeType: mimeType, fileName: fileName)
+  }
+  func enqueueAtr(entityId: String, payload: [String: Any], evidence: Data, mimeType: String, fileName: String) {
+    enqueueEvidence(entityType: "DefectAtrCreate", entityId: entityId, payload: payload, evidence: evidence, mimeType: mimeType, fileName: fileName)
+  }
+  private func enqueueEvidence(entityType: String, entityId: String, payload: [String: Any], evidence: Data, mimeType: String, fileName: String) {
+    let directory = url.deletingLastPathComponent().appendingPathComponent("offline-evidence", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let evidenceURL = directory.appendingPathComponent("\(entityId)-\(fileName)")
+    guard (try? evidence.write(to: evidenceURL, options: .atomic)) != nil else { return }
+    var value = payload
+    value["evidencePath"] = evidenceURL.path
+    value["mimeType"] = mimeType
+    value["fileName"] = fileName
+    enqueue(entityType: entityType, entityId: entityId, payload: value)
   }
   func remove(_ ids: Set<UUID>) { save(all().filter { !ids.contains($0.id) }) }
   private func save(_ items: [OfflineOperation]) {

@@ -14,6 +14,7 @@ import androidx.work.WorkerParameters
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 data class QueuedOperation(val id: Long, val entityType: String, val entityId: String, val timestamp: String, val payload: String)
@@ -41,12 +42,62 @@ class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWork
         val queue = OfflineQueue(applicationContext)
         val items = queue.all().take(50)
         if (items.isEmpty()) return Result.success()
-        val operations = JSONArray().also { array -> items.forEach { item -> array.put(JSONObject().put("entityType", item.entityType).put("entityId", item.entityId).put("clientUpdatedAt", item.timestamp).put("payload", JSONObject(item.payload))) } }
+        val api = ApiClient(sessions)
+        var retryNeeded = false
+        val deferred = items.filter { it.entityType in setOf("DefectCreate", "DefectAtrCreate") }
+        deferred.forEach { item ->
+            runCatching {
+                val payload = JSONObject(item.payload)
+                var mediaId = payload.optString("mediaId")
+                if (mediaId.isBlank()) {
+                    val evidence = File(payload.getString("evidencePath"))
+                    val accuracy = (if (payload.has("locationAccuracyMeters")) payload.optDouble("locationAccuracyMeters") else payload.optDouble("accuracyMeters")).takeIf { it.isFinite() }
+                    val uploaded = api.uploadMedia(
+                        evidence.readBytes(), payload.getString("mimeType"), payload.getString("fileName"),
+                        payload.getDouble("lat"), payload.getDouble("lng"), accuracy,
+                    )
+                    mediaId = uploaded.getString("id")
+                }
+                if (item.entityType == "DefectAtrCreate") {
+                    val body = JSONObject()
+                        .put("summary", payload.getString("summary"))
+                        .put("media", JSONArray().put(mediaId))
+                        .put("lat", payload.getDouble("lat"))
+                        .put("lng", payload.getDouble("lng"))
+                        .put("accuracyMeters", payload.optDouble("accuracyMeters"))
+                    api.post("/api/defects/${payload.getString("defectId")}/atr", body)
+                    payload.optString("evidencePath").takeIf { it.isNotBlank() }?.let { File(it).delete() }
+                    queue.remove(listOf(item.id))
+                    return@runCatching
+                }
+                val location = payload.optString("location").ifBlank {
+                    runCatching { api.reverseGeocode(payload.getDouble("lat"), payload.getDouble("lng")) }
+                        .getOrDefault("${payload.getDouble("lat")}, ${payload.getDouble("lng")}")
+                }
+                val body = JSONObject()
+                    .put("projectId", payload.opt("projectId") ?: JSONObject.NULL)
+                    .put("assetId", payload.opt("assetId") ?: JSONObject.NULL)
+                    .put("title", payload.getString("title"))
+                    .put("description", payload.getString("description"))
+                    .put("location", location)
+                    .put("lat", payload.getDouble("lat"))
+                    .put("lng", payload.getDouble("lng"))
+                    .put("severity", payload.getString("severity"))
+                    .put("locationAccuracyMeters", payload.optDouble("locationAccuracyMeters"))
+                    .put("media", JSONArray().put(mediaId))
+                api.post("/api/defects", body)
+                payload.optString("evidencePath").takeIf { it.isNotBlank() }?.let { File(it).delete() }
+                queue.remove(listOf(item.id))
+            }.onFailure { retryNeeded = true }
+        }
+        val operationsItems = items.filterNot { it.entityType in setOf("DefectCreate", "DefectAtrCreate") }
+        if (operationsItems.isEmpty()) return if (retryNeeded) Result.retry() else Result.success()
+        val operations = JSONArray().also { array -> operationsItems.forEach { item -> array.put(JSONObject().put("entityType", item.entityType).put("entityId", item.entityId).put("clientUpdatedAt", item.timestamp).put("payload", JSONObject(item.payload))) } }
         return runCatching {
-            val response = ApiClient(sessions).post("/api/sync", JSONObject().put("operations", operations)) as JSONObject
+            val response = api.post("/api/sync", JSONObject().put("operations", operations)) as JSONObject
             val applied = response.getJSONArray("applied").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
-            queue.remove(items.filter { it.entityId in applied }.map { it.id })
-            Result.success()
+            queue.remove(operationsItems.filter { it.entityId in applied }.map { it.id })
+            if (retryNeeded) Result.retry() else Result.success()
         }.getOrElse { Result.retry() }
     }
 }

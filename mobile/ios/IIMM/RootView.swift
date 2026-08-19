@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RootView: View {
   @EnvironmentObject var app: AppModel
@@ -189,6 +190,8 @@ struct RecordView: View {
   let record: [String: Any]
   let module: ModuleSpec
   @State private var showingATR = false
+  @State private var showingInspection = false
+  @State private var showingTicket = false
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
       Text(title(record)).bold()
@@ -197,7 +200,10 @@ struct RecordView: View {
       HStack {
         ForEach(Array(actions.prefix(2).enumerated()), id: \.offset) { _, action in
           Button(action.label) {
-            if action.path == "local:atr" { showingATR = true } else { Task {
+            if action.path == "local:atr" { showingATR = true }
+            else if action.path == "local:inspection" { showingInspection = true }
+            else if action.path == "local:ticket" { showingTicket = true }
+            else { Task {
               await app.mutate {
                 do {
                   if ["tenants", "users", "projects", "assets", "inspections", "tickets"].contains(module.id) {
@@ -218,6 +224,10 @@ struct RecordView: View {
       }
     }.padding(.vertical, 5).sheet(isPresented: $showingATR) {
       ATRView(defectId: record["id"] as? String ?? "", isPresented: $showingATR)
+    }.sheet(isPresented: $showingInspection) {
+      InspectionDetailView(record: record, isPresented: $showingInspection)
+    }.sheet(isPresented: $showingTicket) {
+      TicketDetailView(record: record, isPresented: $showingTicket)
     }
   }
   struct Action {
@@ -240,7 +250,7 @@ struct RecordView: View {
           body: ["decision": "reject"]),
       ]
     }
-    if module.id == "defects", role == .maker, status == "Assigned" {
+    if module.id == "defects", role == .maker, ["Assigned", "Reopened"].contains(status) {
       return [.init(label: "Start work", path: "/api/defects/\(id)/start", body: ["status": "In Progress"])]
     }
     if module.id == "defects", role == .maker, status == "In Progress" {
@@ -262,22 +272,8 @@ struct RecordView: View {
         .init(label: "Reopen", path: "/api/defects/\(id)/feedback", body: ["rating": 2, "comment": "The issue still requires attention", "reopen": true]),
       ]
     }
-    if module.id == "inspections", role == .maker || role == .checker, status == "Scheduled" {
-      return [
-        .init(label: "Accept", path: "/api/inspections/\(id)", body: ["status": "Accepted"]),
-        .init(label: "Not ready", path: "/api/inspections/\(id)", body: ["status": "Not Ready"]),
-      ]
-    }
-    if module.id == "inspections", role == .maker || role == .checker, status == "Accepted" {
-      return [.init(label: "Start", path: "/api/inspections/\(id)", body: ["status": "In Progress"])]
-    }
-    if module.id == "inspections", role == .maker || role == .checker, status == "In Progress" {
-      let checklist = (record["checklist"] as? [[String: Any]] ?? []).map { ["item": $0["item"] as? String ?? "Checklist item", "status": "Pass", "note": "Completed in native app"] }
-      return [.init(label: "Complete · all pass", path: "/api/inspections/\(id)", body: ["status": "Completed", "checklist": checklist])]
-    }
-    if module.id == "tickets", [.tenantAdmin, .authority, .checker].contains(role), !["Resolved", "Closed"].contains(status) {
-      return [.init(label: "Resolve", path: "/api/tickets/\(id)", body: ["status": "Resolved", "message": "Resolved from the native app"])]
-    }
+    if module.id == "inspections" { return [.init(label: "Open checklist", path: "local:inspection", body: [:])] }
+    if module.id == "tickets" { return [.init(label: "View & respond", path: "local:ticket", body: [:])] }
     if module.id == "tenants", role == .tenantAdmin {
       let live = status == "Live"
       return [.init(label: live ? "Deactivate" : "Set live", path: "/api/tenants/\(id)", body: ["status": live ? "Inactive" : "Live"])]
@@ -303,24 +299,196 @@ struct RecordView: View {
       return [
         .init(
           label: "Verify", path: "/api/payments/\(id)/action",
-          body: ["decision": "approve", "note": "Verified in native app"])
+          body: ["decision": "approve", "note": "Verified in native app"]),
+        .init(
+          label: "Reject", path: "/api/payments/\(id)/action",
+          body: ["decision": "reject", "note": "Rejected in native app"]),
       ]
     }
     if module.id == "payments", role == .authority, status == "Checker Verified" {
       return [
         .init(
           label: "Approve", path: "/api/payments/\(id)/action",
-          body: ["decision": "approve", "note": "Approved in native app"])
+          body: ["decision": "approve", "note": "Approved in native app"]),
+        .init(
+          label: "Reject", path: "/api/payments/\(id)/action",
+          body: ["decision": "reject", "note": "Rejected in native app"]),
       ]
     }
     if module.id == "sync", role == .checker || role == .authority {
       return [
         .init(
           label: "Keep server", path: "/api/sync/conflicts/\(id)/resolve",
-          body: ["decision": "keep-server", "note": "Reviewed in native app"])
+          body: ["decision": "keep-server", "note": "Compared the queued edit with the current server record in the native app."]),
+        .init(
+          label: "Accept reviewed client", path: "/api/sync/conflicts/\(id)/resolve",
+          body: ["decision": "reviewed-client", "note": "Reviewed the queued client edit and accepted it for manual follow-up."]),
       ]
     }
     return []
+  }
+}
+
+struct InspectionChecklistDraft: Identifiable {
+  let id = UUID()
+  var item: String
+  var status: String
+  var note: String
+}
+
+struct InspectionDetailView: View {
+  @EnvironmentObject var app: AppModel
+  let record: [String: Any]
+  @Binding var isPresented: Bool
+  @State private var checklist: [InspectionChecklistDraft]
+
+  init(record: [String: Any], isPresented: Binding<Bool>) {
+    self.record = record
+    self._isPresented = isPresented
+    let values = (record["checklist"] as? [[String: Any]] ?? []).map {
+      InspectionChecklistDraft(
+        item: $0["item"] as? String ?? "Checklist item",
+        status: $0["status"] as? String ?? "Pending",
+        note: $0["note"] as? String ?? "")
+    }
+    self._checklist = State(initialValue: values)
+  }
+
+  private var role: Role? { app.session?.user.role }
+  private var editable: Bool { role == .maker || role == .checker }
+  private var status: String { record["status"] as? String ?? "" }
+  private var id: String { record["id"] as? String ?? "" }
+  private var checklistJSON: [[String: Any]] {
+    checklist.map { item in
+      var value: [String: Any] = ["item": item.item, "status": item.status]
+      if !item.note.isEmpty { value["note"] = item.note }
+      return value
+    }
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Inspection") {
+          LabeledContent("ID", value: id)
+          LabeledContent("Type", value: record["type"] as? String ?? "")
+          LabeledContent("Status", value: status)
+        }
+        Section("Asset checklist") {
+          if checklist.isEmpty { Text("No checklist items were configured.").foregroundStyle(.secondary) }
+          ForEach($checklist) { $item in
+            VStack(alignment: .leading, spacing: 8) {
+              Text(item.item).font(.headline)
+              if editable && ["In Progress", "Paused"].contains(status) {
+                Picker("Result", selection: $item.status) {
+                  Text("Pending").tag("Pending")
+                  Text("Pass").tag("Pass")
+                  Text("Flag").tag("Flag")
+                }.pickerStyle(.segmented)
+                if item.status == "Flag" {
+                  TextField("Describe the issue", text: $item.note, axis: .vertical).lineLimit(2...4)
+                }
+              } else { Text(item.status).foregroundStyle(.secondary) }
+            }.padding(.vertical, 4)
+          }
+        }
+        if editable {
+          Section("Workflow") {
+            if status == "Scheduled" {
+              Button("Accept") { Task { await update(["status": "Accepted"]) } }
+              Button("Not ready") { Task { await update(["status": "Not Ready"]) } }
+              Button("Reject", role: .destructive) { Task { await update(["status": "Rejected"]) } }
+            } else if status == "Accepted" {
+              Button("Start inspection") { Task { await update(["status": "In Progress"]) } }
+            } else if status == "Paused" {
+              Button("Resume inspection") { Task { await update(["status": "In Progress", "checklist": checklistJSON]) } }
+            } else if status == "In Progress" {
+              Button("Pause and save") { Task { await update(["status": "Paused", "checklist": checklistJSON]) } }
+              Button("Complete inspection") { Task { await update(["status": "Completed", "checklist": checklistJSON]) } }
+                .disabled(checklist.contains { $0.status == "Pending" })
+            }
+          }
+        }
+      }.navigationTitle("Inspection checklist").navigationBarTitleDisplayMode(.inline).toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Close") { isPresented = false } }
+        if editable && ["In Progress", "Paused"].contains(status) {
+          ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await update(["checklist": checklistJSON]) } } }
+        }
+      }
+    }
+  }
+
+  private func update(_ body: [String: Any]) async {
+    await app.mutate {
+      do { _ = try await app.api.patch("/api/inspections/\(id)", body: body) }
+      catch {
+        guard (error as NSError).domain == NSURLErrorDomain else { throw error }
+        app.queue.enqueue(entityType: "Inspection", entityId: id, payload: body)
+      }
+      isPresented = false
+    }
+  }
+}
+
+struct TicketDetailView: View {
+  @EnvironmentObject var app: AppModel
+  let record: [String: Any]
+  @Binding var isPresented: Bool
+  @State private var message = ""
+  private var id: String { record["id"] as? String ?? "" }
+  private var status: String { record["status"] as? String ?? "" }
+  private var manager: Bool {
+    guard let role = app.session?.user.role else { return false }
+    return [.tenantAdmin, .authority, .checker].contains(role)
+  }
+  private var nextStatus: String? {
+    switch status {
+    case "Open", "Reopened": "Assigned"
+    case "Assigned": "In Progress"
+    case "In Progress": "Resolved"
+    case "Resolved": "Closed"
+    default: nil
+    }
+  }
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Ticket") {
+          Text(record["subject"] as? String ?? id).font(.headline)
+          LabeledContent("Priority", value: record["priority"] as? String ?? "")
+          LabeledContent("Status", value: status)
+        }
+        Section("Conversation") {
+          let messages = record["messages"] as? [[String: Any]] ?? []
+          ForEach(Array(messages.suffix(10).enumerated()), id: \.offset) { _, item in
+            VStack(alignment: .leading, spacing: 4) {
+              Text((item["by"] as? String) == app.session?.user.id ? "You" : item["by"] as? String ?? "Support").font(.caption.bold())
+              Text(item["text"] as? String ?? "")
+              Text(item["at"] as? String ?? "").font(.caption2).foregroundStyle(.secondary)
+            }.padding(.vertical, 3)
+          }
+          TextField("Add an update", text: $message, axis: .vertical).lineLimit(2...5)
+          Button("Send update") { Task { await update(["message": message.trimmingCharacters(in: .whitespacesAndNewlines)]) } }
+            .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).count < 2)
+        }
+        Section("Workflow") {
+          if manager, let nextStatus {
+            Button("Move to \(nextStatus)") { Task { await update(["status": nextStatus, "message": "Moved to \(nextStatus) from the native helpdesk."]) } }
+          }
+          if !manager, (record["raisedBy"] as? String) == app.session?.user.id, ["Resolved", "Closed"].contains(status) {
+            Button("Reopen ticket") { Task { await update(["status": "Reopened", "message": "Resolution is not satisfactory; reopening for support."]) } }
+          }
+        }
+      }.navigationTitle("Helpdesk").navigationBarTitleDisplayMode(.inline).toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Close") { isPresented = false } }
+      }
+    }
+  }
+  private func update(_ body: [String: Any]) async {
+    await app.mutate {
+      _ = try await app.api.patch("/api/tickets/\(id)", body: body)
+      isPresented = false
+    }
   }
 }
 
@@ -332,6 +500,8 @@ struct ATRView: View {
   @State private var summary = ""
   @State private var evidenceItem: PhotosPickerItem?
   @State private var evidenceData: Data?
+  @State private var evidenceMimeType = "image/jpeg"
+  @State private var evidenceFileExtension = "jpg"
   @State private var showingCamera = false
   var body: some View {
     NavigationStack {
@@ -346,7 +516,13 @@ struct ATRView: View {
         PhotosPicker(selection: $evidenceItem, matching: .any(of: [.images, .videos])) {
           Label(evidenceData == nil ? "Choose photo or video" : "Evidence selected", systemImage: "photo.on.rectangle")
         }.onChange(of: evidenceItem) { _, item in
-          Task { evidenceData = try? await item?.loadTransferable(type: Data.self) }
+          Task {
+            evidenceData = try? await item?.loadTransferable(type: Data.self)
+            if let type = item?.supportedContentTypes.first {
+              evidenceMimeType = type.preferredMIMEType ?? "image/jpeg"
+              evidenceFileExtension = type.preferredFilenameExtension ?? "jpg"
+            }
+          }
         }
         if let gps = location.location { Text(String(format: "GPS %.6f, %.6f · ±%.0f m", gps.coordinate.latitude, gps.coordinate.longitude, gps.horizontalAccuracy)).font(.caption) }
         else { Button("Acquire current GPS") { location.request() } }
@@ -355,14 +531,30 @@ struct ATRView: View {
         ToolbarItem(placement: .confirmationAction) { Button("Submit") { Task { await submit() } }.disabled(summary.count < 10 || evidenceData == nil) }
       }
     }.task { location.request() }.sheet(isPresented: $showingCamera) {
-      CameraPicker { evidenceData = $0 }
+      CameraPicker { evidenceData = $0; evidenceMimeType = "image/jpeg"; evidenceFileExtension = "jpg" }
     }
   }
   private func submit() async {
     await app.mutate {
       guard let gps = location.location, let evidenceData else { throw APIError.server("Current GPS and one photo or video are required.") }
-      let media = try await app.api.upload(data: evidenceData, mimeType: "image/jpeg", fileName: "iimm-atr-\(Int(Date().timeIntervalSince1970)).jpg", lat: gps.coordinate.latitude, lng: gps.coordinate.longitude, accuracyMeters: gps.horizontalAccuracy)
-      _ = try await app.api.post("/api/defects/\(defectId)/atr", body: ["summary": summary, "media": [media["id"] as? String ?? ""], "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy])
+      let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+      let localId = "local-atr-\(timestamp)"
+      let fileName = "iimm-atr-\(timestamp).\(evidenceFileExtension)"
+      let payload: [String: Any] = ["defectId": defectId, "summary": summary, "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy]
+      do {
+        let media = try await app.api.upload(data: evidenceData, mimeType: evidenceMimeType, fileName: fileName, lat: gps.coordinate.latitude, lng: gps.coordinate.longitude, accuracyMeters: gps.horizontalAccuracy)
+        do {
+          _ = try await app.api.post("/api/defects/\(defectId)/atr", body: ["summary": summary, "media": [media["id"] as? String ?? ""], "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy])
+        } catch {
+          guard (error as NSError).domain == NSURLErrorDomain else { throw error }
+          var queued = payload
+          queued["mediaId"] = media["id"] as? String ?? ""
+          app.queue.enqueue(entityType: "DefectAtrCreate", entityId: localId, payload: queued)
+        }
+      } catch {
+        guard (error as NSError).domain == NSURLErrorDomain else { throw error }
+        app.queue.enqueueAtr(entityId: localId, payload: payload, evidence: evidenceData, mimeType: evidenceMimeType, fileName: fileName)
+      }
       isPresented = false
     }
   }
@@ -378,6 +570,8 @@ struct CreateView: View {
   @State private var third = ""
   @State private var evidenceItem: PhotosPickerItem?
   @State private var evidenceData: Data?
+  @State private var evidenceMimeType = "image/jpeg"
+  @State private var evidenceFileExtension = "jpg"
   @State private var showingCamera = false
   var labels: [String] {
     switch module.id {
@@ -408,7 +602,13 @@ struct CreateView: View {
           PhotosPicker(selection: $evidenceItem, matching: .any(of: [.images, .videos])) {
             Label(evidenceData == nil ? "Choose required photo or video" : "Evidence selected", systemImage: "photo.on.rectangle")
           }.onChange(of: evidenceItem) { _, item in
-            Task { evidenceData = try? await item?.loadTransferable(type: Data.self) }
+            Task {
+              evidenceData = try? await item?.loadTransferable(type: Data.self)
+              if let type = item?.supportedContentTypes.first {
+                evidenceMimeType = type.preferredMIMEType ?? "image/jpeg"
+                evidenceFileExtension = type.preferredFilenameExtension ?? "jpg"
+              }
+            }
           }
           if let gps = location.location {
             Text(String(format: "GPS %.6f, %.6f · ±%.0f m", gps.coordinate.latitude, gps.coordinate.longitude, gps.horizontalAccuracy)).font(.caption).foregroundStyle(.secondary)
@@ -423,14 +623,14 @@ struct CreateView: View {
         }
       }
     }.task { if module.id == "attendance" || module.id == "defects" { location.request() } }.sheet(isPresented: $showingCamera) {
-      CameraPicker { evidenceData = $0 }
+      CameraPicker { evidenceData = $0; evidenceMimeType = "image/jpeg"; evidenceFileExtension = "jpg" }
     }
   }
   func submit() async {
     await app.mutate {
-      let projects = try await app.api.get("/api/projects") as? [[String: Any]] ?? []
-      let users = try await app.api.get("/api/users") as? [[String: Any]] ?? []
-      let assets = try await app.api.get("/api/assets") as? [[String: Any]] ?? []
+      let projects = (try? await app.api.get("/api/projects")) as? [[String: Any]] ?? []
+      let users = (try? await app.api.get("/api/users")) as? [[String: Any]] ?? []
+      let assets = (try? await app.api.get("/api/assets")) as? [[String: Any]] ?? []
       let project = projects.first?["id"] as? String ?? ""
       let checker = users.first { $0["role"] as? String == "checker" }?["id"] as? String ?? ""
       let authority = users.first { $0["role"] as? String == "authority" }?["id"] as? String ?? ""
@@ -444,15 +644,27 @@ struct CreateView: View {
         body = ["projectId": first.isEmpty ? project : first, "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude, "accuracyMeters": gps.horizontalAccuracy, "offline": false]
       case "defects":
         guard let gps = location.location, let evidenceData else { throw APIError.server("Current GPS and one photo or video are required.") }
-        let uploaded = try await app.api.upload(data: evidenceData, mimeType: "image/jpeg", fileName: "iimm-evidence-\(Int(Date().timeIntervalSince1970)).jpg", lat: gps.coordinate.latitude, lng: gps.coordinate.longitude, accuracyMeters: gps.horizontalAccuracy)
-        let address = try await app.api.reverse(lat: gps.coordinate.latitude, lng: gps.coordinate.longitude)
-        path = "/api/defects"
-        body = [
-          "projectId": project, "assetId": NSNull(), "title": first, "description": second,
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let fileName = "iimm-evidence-\(timestamp).\(evidenceFileExtension)"
+        let address = (try? await app.api.reverse(lat: gps.coordinate.latitude, lng: gps.coordinate.longitude)) ?? "\(gps.coordinate.latitude), \(gps.coordinate.longitude)"
+        let defectBody: [String: Any] = [
+          "projectId": project.isEmpty ? NSNull() : project, "assetId": NSNull(), "title": first, "description": second,
           "location": address, "lat": gps.coordinate.latitude, "lng": gps.coordinate.longitude,
           "severity": ["Low", "Medium", "High", "Critical"].contains(third) ? third : "Medium",
-          "media": [uploaded["id"] as? String ?? ""], "locationAccuracyMeters": gps.horizontalAccuracy,
+          "locationAccuracyMeters": gps.horizontalAccuracy,
         ]
+        do {
+          let uploaded = try await app.api.upload(data: evidenceData, mimeType: evidenceMimeType, fileName: fileName, lat: gps.coordinate.latitude, lng: gps.coordinate.longitude, accuracyMeters: gps.horizontalAccuracy)
+          var onlineBody = defectBody
+          onlineBody["media"] = [uploaded["id"] as? String ?? ""]
+          _ = try await app.api.post("/api/defects", body: onlineBody)
+        } catch {
+          guard (error as NSError).domain == NSURLErrorDomain else { throw error }
+          app.queue.enqueueDefect(entityId: "local-defect-\(timestamp)", payload: defectBody, evidence: evidenceData, mimeType: evidenceMimeType, fileName: fileName)
+          app.error = "The issue report and its evidence were saved offline and will sync automatically when connectivity returns."
+        }
+        isPresented = false
+        return
       case "tickets":
         path = "/api/tickets"
         body = [
