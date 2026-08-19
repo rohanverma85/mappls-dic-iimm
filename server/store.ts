@@ -60,6 +60,7 @@ export class JsonStore {
       defects,
       gisLayers: input.gisLayers ?? defaults.gisLayers,
       syncConflicts: input.syncConflicts ?? [],
+      mediaEvidence: input.mediaEvidence ?? [],
     };
   }
 

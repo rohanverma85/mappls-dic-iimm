@@ -29,7 +29,7 @@ Deep GIS/Bhuvan integration is explicitly listed as out of scope for the prototy
 - Functional no-token network-map preview, so geometry workflows remain testable.
 - Project circles, asset/network geometry and defects on one operational map.
 - Server-calculated Haversine geofence results for attendance and defects.
-- Device GPS capture, reverse-geocode proxy, accuracy recording and geo-tagged ATR evidence.
+- Device GPS capture, reverse-geocode proxy, accuracy recording, and authenticated tenant-scoped photo/video uploads for defect and ATR evidence.
 - Maker start-work → ATR → Checker verify/rework → Citizen confirm/reopen lifecycle.
 - Server-timestamp offline conflict queue for manual review.
 - Authority-only GeoJSON publication endpoint as a stable interchange seam.

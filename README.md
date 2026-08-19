@@ -9,7 +9,7 @@ Integrated Infrastructure Management & Maintenance is a full-stack, role-aware p
 - Multi-tenant provisioning with organisation hierarchy, configurable asset types, modules and SLAs
 - Projects, assets, geo-fenced attendance, Joint/Requested inspections and offline-sync states
 - Mappls Web Maps integration with tenant-scoped network layers, asset geometry, project geofences and mapped defects
-- Citizen duplicate detection, Checker validation, Maker ATR and Checker closure verification
+- Real geo-tagged photo/video evidence upload, Citizen duplicate detection, Checker validation, Maker ATR and Checker closure verification
 - Maker → Checker → Authority payment approval enforcement
 - Helpdesk, notifications, scoped search, CSV reports and activity/audit trail
 - Responsive desktop, tablet and mobile layouts
@@ -49,6 +49,8 @@ This runs TypeScript checks, workflow/API tests and the production build.
 ## Persistence
 
 The Express service seeds `data/store.json` on first run and persists prototype mutations there. The generated store file is git-ignored so each environment starts from the canonical seed in `server/seed.ts`.
+
+Field evidence is uploaded as authenticated, tenant-scoped binary media with capture coordinates, GPS accuracy, timestamp, MIME allowlisting and an 8 MB per-file limit. Prototype files live under the git-ignored `data/uploads` directory; production should replace this adapter with managed object storage and malware scanning.
 
 ## GIS scope decision
 

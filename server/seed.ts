@@ -105,4 +105,5 @@ export const seedData: StoreData = {
     ]}},
   ],
   syncConflicts: [],
+  mediaEvidence: [],
 };

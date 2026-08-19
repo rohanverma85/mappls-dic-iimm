@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
-import type { Defect, GeoJsonGeometry, HelpdeskTicket, Inspection, Notification, Payment, Role, StoreData, User } from '../shared/types.js';
+import type { Defect, GeoJsonGeometry, HelpdeskTicket, Inspection, MediaEvidence, Notification, Payment, Role, StoreData, User } from '../shared/types.js';
 import { geofenceFor, haversineMeters } from './geo.js';
 import { store } from './store.js';
 
@@ -15,6 +17,7 @@ const id = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 const activeStatuses = new Set(['Under Checker Review','Assigned','In Progress','ATR Submitted','Reopened']);
 const severityRank = ['Low','Medium','High','Critical'] as const;
 const roleSchema = z.enum(['tenant_admin','authority','maker','checker','citizen']);
+const uploadDir = path.resolve(process.cwd(),'data/uploads');
 
 const safeUser = (user: User) => user;
 const tokenFor = (user: User) => Buffer.from(`iimm:${user.id}`).toString('base64url');
@@ -98,6 +101,35 @@ export function createApp() {
     const data = await store.all();
     const tenant = req.user!.tenantId ? data.tenants.find((item) => item.id === req.user!.tenantId) ?? null : null;
     res.json({ token: tokenFor(req.user!), user: safeUser(req.user!), tenant });
+  });
+
+  app.post('/api/media', auth, allow('authority','maker','checker','citizen'), express.raw({type:['image/*','video/*'],limit:'8mb'}), async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error:'A photo or video file is required.' });
+    const mimeType = String(req.header('content-type') ?? '').split(';')[0].toLowerCase();
+    const extensionByMime:Record<string,string> = { 'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','image/heic':'.heic','video/mp4':'.mp4','video/quicktime':'.mov','video/webm':'.webm' };
+    const extension = extensionByMime[mimeType];
+    if (!extension) return res.status(415).json({ error:'Supported evidence formats are JPEG, PNG, WebP, HEIC, MP4, MOV and WebM.' });
+    const coordinates = z.object({
+      lat:z.coerce.number().min(-90).max(90), lng:z.coerce.number().min(-180).max(180),
+      accuracyMeters:z.coerce.number().min(0).max(10_000).optional(), capturedAt:z.string().datetime().optional(),
+    }).parse({lat:req.header('x-capture-lat'),lng:req.header('x-capture-lng'),accuracyMeters:req.header('x-capture-accuracy')||undefined,capturedAt:req.header('x-captured-at')||undefined});
+    const evidenceId = id('media');
+    const storageName = `${evidenceId}${extension}`;
+    const originalName = String(req.header('x-file-name') || `field-evidence${extension}`).replace(/[\r\n"]/g,'').slice(0,180);
+    await mkdir(uploadDir,{recursive:true});
+    await writeFile(path.join(uploadDir,storageName),req.body);
+    const evidence:MediaEvidence = { id:evidenceId, tenantId:req.user!.tenantId!, uploadedBy:req.user!.id, originalName, mimeType, size:req.body.length, storageName, capturedAt:coordinates.capturedAt ?? new Date().toISOString(), lat:coordinates.lat, lng:coordinates.lng, accuracyMeters:coordinates.accuracyMeters };
+    await store.mutate((data)=>{data.mediaEvidence.unshift(evidence);});
+    await log(req.user!,'UPLOADED_GEO_EVIDENCE','MediaEvidence',evidence.id,`${evidence.originalName} · ${evidence.lat.toFixed(5)}, ${evidence.lng.toFixed(5)}.`);
+    res.status(201).json(evidence);
+  });
+
+  app.get('/api/media/:id', auth, async (req,res) => {
+    const evidence = tenantScope((await store.all()).mediaEvidence,req.user!).find((item)=>item.id===req.params.id);
+    if (!evidence) return res.status(404).json({error:'Evidence not found in the active tenant.'});
+    res.type(evidence.mimeType);
+    res.setHeader('content-disposition',`inline; filename="${evidence.originalName}"`);
+    res.sendFile(path.join(uploadDir,evidence.storageName));
   });
 
   app.get('/api/mappls/config', auth, (_req, res) => {
@@ -215,6 +247,7 @@ export function createApp() {
     const updated = await store.mutate((data) => {
       const user = data.users.find((item) => item.id === req.params.id && (req.user!.role === 'tenant_admin' || item.tenantId === req.user!.tenantId));
       if (!user || user.role === 'tenant_admin' || user.role === 'citizen') return null;
+      if (user.id === req.user!.id && body.active === false) return null;
       Object.assign(user, body);
       return user;
     });
@@ -227,10 +260,14 @@ export function createApp() {
   app.post('/api/projects', auth, allow('authority'), async (req, res) => {
     const body = z.object({ code:z.string().min(3), name:z.string().min(3), location:z.string().min(3), assetType:z.string().min(2), makerIds:z.array(z.string()).default([]), checkerIds:z.array(z.string()).default([]), center:z.object({lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180)}).optional(), geofenceRadiusMeters:z.number().int().min(25).max(10_000).default(250) }).parse(req.body);
     const created = await store.mutate((data) => {
+      const validMakers = body.makerIds.every((userId)=>data.users.some((user)=>user.id===userId&&user.tenantId===req.user!.tenantId&&user.role==='maker'&&user.active));
+      const validCheckers = body.checkerIds.every((userId)=>data.users.some((user)=>user.id===userId&&user.tenantId===req.user!.tenantId&&user.role==='checker'&&user.active));
+      if (!validMakers || !validCheckers) return null;
       const project = { id:id('prj'), tenantId:req.user!.tenantId!, ...body, center:body.center ?? {lat:28.6139,lng:77.2090}, status:'Pending' as const, progress:0, milestones:[], documents:[] };
       data.projects.unshift(project);
       return project;
     });
+    if (!created) return res.status(400).json({error:'Maker and Checker assignments must be active users in the current tenant.'});
     await log(req.user!, 'CREATED_PROJECT', 'Project', created.id, `Created ${created.code} · ${created.name}.`);
     res.status(201).json(created);
   });
@@ -300,10 +337,16 @@ export function createApp() {
   app.post('/api/inspections', auth, allow('authority','maker','checker'), async (req, res) => {
     const body = z.object({ projectId:z.string(), assetId:z.string(), type:z.enum(['Joint','Requested']), makerId:z.string(), checkerId:z.string(), scheduledAt:z.string().datetime(), checklist:z.array(z.string()) }).parse(req.body);
     const created = await store.mutate((data) => {
+      const project = data.projects.find((item)=>item.id===body.projectId&&item.tenantId===req.user!.tenantId);
+      const asset = data.assets.find((item)=>item.id===body.assetId&&item.tenantId===req.user!.tenantId&&item.projectId===body.projectId);
+      const maker = data.users.find((item)=>item.id===body.makerId&&item.tenantId===req.user!.tenantId&&item.role==='maker'&&item.active);
+      const checker = data.users.find((item)=>item.id===body.checkerId&&item.tenantId===req.user!.tenantId&&item.role==='checker'&&item.active);
+      if (!project||!asset||!maker||!checker) return null;
       const inspection: Inspection = { id:`INS-${Math.floor(1000 + Math.random()*9000)}`, tenantId:req.user!.tenantId!, ...body, status:'Scheduled', checklist:body.checklist.map((item) => ({ item,status:'Pending' })), offlineState:'Synced' };
       data.inspections.unshift(inspection);
       return inspection;
     });
+    if (!created) return res.status(400).json({error:'Inspection project, asset, Maker and Checker must belong to the current tenant.'});
     await log(req.user!, 'SCHEDULED_INSPECTION', 'Inspection', created.id, `${created.type} inspection scheduled.`);
     res.status(201).json(created);
   });
@@ -327,7 +370,7 @@ export function createApp() {
 
   app.get('/api/defects', auth, async (req, res) => res.json(visibleToUser((await store.all()).defects, req.user!)));
   app.post('/api/defects', auth, async (req, res) => {
-    const body = z.object({ title:z.string().min(4), description:z.string().min(8), location:z.string().min(3), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), locationAccuracyMeters:z.number().min(0).max(10_000).optional(), severity:z.enum(['Critical','High','Medium','Low']).default('Medium'), projectId:z.string().nullable().default(null), assetId:z.string().nullable().default(null), media:z.array(z.string()).default([]) }).parse(req.body);
+    const body = z.object({ title:z.string().min(4), description:z.string().min(8), location:z.string().min(3), lat:z.number().min(-90).max(90), lng:z.number().min(-180).max(180), locationAccuracyMeters:z.number().min(0).max(10_000).optional(), severity:z.enum(['Critical','High','Medium','Low']).default('Medium'), projectId:z.string().nullable().default(null), assetId:z.string().nullable().default(null), media:z.array(z.string()).min(1) }).parse(req.body);
     const data = await store.all();
     const source = req.user!.role === 'citizen' ? 'Citizen' : 'Internal';
     const project = body.projectId ? data.projects.find((item) => item.id === body.projectId && item.tenantId === req.user!.tenantId) : undefined;
@@ -443,10 +486,15 @@ export function createApp() {
   app.post('/api/payments', auth, allow('maker'), async (req, res) => {
     const body = z.object({ projectId:z.string(), invoiceNo:z.string().min(4), checkerId:z.string(), authorityId:z.string(), amount:z.number().positive(), attendanceReference:z.string(), inspectionReference:z.string() }).parse(req.body);
     const created = await store.mutate((data) => {
+      const project = data.projects.find((item)=>item.id===body.projectId&&item.tenantId===req.user!.tenantId&&item.makerIds.includes(req.user!.id));
+      const checker = data.users.find((item)=>item.id===body.checkerId&&item.tenantId===req.user!.tenantId&&item.role==='checker'&&item.active);
+      const authority = data.users.find((item)=>item.id===body.authorityId&&item.tenantId===req.user!.tenantId&&item.role==='authority'&&item.active);
+      if (!project||!checker||!authority) return null;
       const payment: Payment = { id:`PAY-${Math.floor(1000+Math.random()*9000)}`, tenantId:req.user!.tenantId!, makerId:req.user!.id, ...body, status:'Submitted', submittedAt:new Date().toISOString() };
       data.payments.unshift(payment);
       return payment;
     });
+    if (!created) return res.status(403).json({error:'The claim must use your assigned project and active tenant-side Checker and Authority users.'});
     await log(req.user!, 'SUBMITTED_PAYMENT', 'Payment', created.id, `Invoice ${created.invoiceNo} submitted for ₹${created.amount}.`);
     res.status(201).json(created);
   });

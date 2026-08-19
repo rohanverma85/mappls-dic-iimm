@@ -28,6 +28,19 @@ describe('IIMM API', () => {
     expect(projects.body.every((project:{tenantId:string}) => project.tenantId === 'tenant-nhai')).toBe(true);
   });
 
+  it('stores geo-tagged field media and keeps it tenant-scoped', async () => {
+    const maker = await login('usr-maker-1');
+    const otherTenant = await login('usr-maker-2');
+    const upload = await request(app).post('/api/media').set(auth(maker))
+      .set('content-type','image/jpeg').set('x-file-name','bridge-evidence.jpg')
+      .set('x-capture-lat','23.1462').set('x-capture-lng','79.9341').set('x-capture-accuracy','6')
+      .send(Buffer.from([0xff,0xd8,0xff,0xd9])).expect(201);
+    expect(upload.body.originalName).toBe('bridge-evidence.jpg');
+    expect(upload.body.lat).toBe(23.1462);
+    await request(app).get(`/api/media/${upload.body.id}`).set(auth(maker)).expect(200).expect('content-type',/image\/jpeg/);
+    await request(app).get(`/api/media/${upload.body.id}`).set(auth(otherTenant)).expect(404);
+  });
+
   it('links a nearby citizen report and escalates severity instead of creating a duplicate', async () => {
     const token = await login('usr-citizen-1');
     const result = await request(app).post('/api/defects').set(auth(token)).send({
@@ -49,6 +62,13 @@ describe('IIMM API', () => {
     expect(verified.body.status).toBe('Checker Verified');
     const approved = await request(app).post(`/api/payments/${created.body.id}/action`).set(auth(authority)).send({decision:'approve',note:'Authorised'}).expect(200);
     expect(approved.body.status).toBe('Authority Approved');
+  });
+
+  it('rejects cross-tenant project assignments and payment references', async () => {
+    const authority = await login('usr-auth-1');
+    const maker = await login('usr-maker-1');
+    await request(app).post('/api/projects').set(auth(authority)).send({code:'NHAI/X/1',name:'Invalid cross tenant assignment',location:'Test corridor',assetType:'Highway Section',makerIds:['usr-maker-2'],checkerIds:['usr-checker-1'],center:{lat:23.1,lng:79.9},geofenceRadiusMeters:250}).expect(400);
+    await request(app).post('/api/payments').set(auth(maker)).send({projectId:'prj-3',invoiceNo:'CROSS/TENANT/1',checkerId:'usr-checker-2',authorityId:'usr-auth-2',amount:1000,attendanceReference:'none',inspectionReference:'none'}).expect(403);
   });
 
   it('requires a Checker to validate citizen defects before Maker assignment', async () => {

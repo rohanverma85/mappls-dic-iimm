@@ -1,4 +1,4 @@
-import type { Session } from '../shared/types';
+import type { MediaEvidence, Session } from '../shared/types';
 
 const SESSION_KEY = 'iimm-session';
 
@@ -30,3 +30,17 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 
 export const post = <T>(path: string, body: unknown) => api<T>(path, { method:'POST', body:JSON.stringify(body) });
 export const patch = <T>(path: string, body: unknown) => api<T>(path, { method:'PATCH', body:JSON.stringify(body) });
+
+export function uploadEvidence(file:File, location:{lat:number;lng:number;accuracyMeters:number}) {
+  return api<MediaEvidence>('/api/media',{
+    method:'POST', body:file,
+    headers:{
+      'content-type':file.type,
+      'x-file-name':file.name.replace(/[^\x20-\x7e]/g,'_'),
+      'x-capture-lat':String(location.lat),
+      'x-capture-lng':String(location.lng),
+      'x-capture-accuracy':String(location.accuracyMeters),
+      'x-captured-at':new Date(file.lastModified || Date.now()).toISOString(),
+    },
+  });
+}

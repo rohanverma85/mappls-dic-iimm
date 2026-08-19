@@ -51,6 +51,20 @@ export interface GeofenceResult {
   sourceId: string;
 }
 
+export interface MediaEvidence {
+  id: string;
+  tenantId: string;
+  uploadedBy: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  storageName: string;
+  capturedAt: string;
+  lat: number;
+  lng: number;
+  accuracyMeters?: number;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -250,6 +264,7 @@ export interface StoreData {
   activities: Activity[];
   gisLayers: GisLayer[];
   syncConflicts: SyncConflict[];
+  mediaEvidence: MediaEvidence[];
 }
 
 export interface GisOverview {
