@@ -59,7 +59,7 @@ function loadMappls(accessToken:string, version:string) {
     const script = document.createElement('script');
     // Keep the loader URL identical to the current Mappls Web Maps JS v3
     // documentation. In particular, v3 does not require a JSONP callback.
-    script.src = `https://sdk.mappls.com/map/sdk/web?v=${encodeURIComponent(version)}&access_token=${encodeURIComponent(accessToken)}&layer=vector`;
+    script.src = `https://sdk.mappls.com/map/sdk/web?v=${encodeURIComponent(version)}&access_token=${encodeURIComponent(accessToken)}`;
     script.dataset.iimmMapplsSdk = 'true';
     script.async = true;
     script.defer = true;
