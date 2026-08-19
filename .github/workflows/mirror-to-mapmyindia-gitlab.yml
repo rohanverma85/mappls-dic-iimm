@@ -1,0 +1,33 @@
+name: Mirror to MapmyIndia GitLab
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mapmyindia-gitlab-mirror
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Mirror all branches and tags
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLAB_TOKEN: ${{ secrets.MAPMYINDIA_GITLAB_TOKEN }}
+        run: |
+          test -n "$GITLAB_TOKEN"
+          git clone --bare "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" source.git
+          cd source.git
+          git remote add mapmyindia "https://oauth2:${GITLAB_TOKEN}@mmigit.mapmyindia.com/rohan/mappls-dic-iimm.git"
+          git push --prune mapmyindia '+refs/heads/*:refs/heads/*'
+          git push --prune mapmyindia '+refs/tags/*:refs/tags/*'
