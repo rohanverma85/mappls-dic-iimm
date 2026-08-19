@@ -27,7 +27,7 @@ interface Props {
 type MapplsMapInstance = {
   on?:(event:string,callback:(event?:unknown)=>void)=>void;
   addListener?:(event:string,callback:(event?:unknown)=>void)=>unknown;
-  setCenter?:(position:{lat:number;lng:number}|[number,number])=>void;
+  setCenter?:(position:{lat:number;lng:number})=>void;
   setZoom?:(zoom:number)=>void;
   loaded?:()=>boolean;
   isStyleLoaded?:()=>boolean;
@@ -108,7 +108,7 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
 
   useEffect(()=>{ api<MapplsConfig>('/api/mappls/config').then(setConfig).catch(()=>setState('fallback')); },[]);
   useEffect(()=>{onSelectRef.current=onLocationSelect;},[onLocationSelect]);
-  useEffect(()=>{const target=selectedLocation??focus;if(target&&mapRef.current?.setCenter){try{mapRef.current.setCenter([target.lat,target.lng]);}catch{/* map remains interactive at its current viewport */}}},[selectedLocation?.lat,selectedLocation?.lng,focus?.lat,focus?.lng]);
+  useEffect(()=>{const target=selectedLocation??focus;if(target&&mapRef.current?.setCenter){try{mapRef.current.setCenter({lat:target.lat,lng:target.lng});}catch{/* map remains interactive at its current viewport */}}},[selectedLocation?.lat,selectedLocation?.lng,focus?.lat,focus?.lng]);
   useEffect(()=>{
     if (!config) return;
     if (!config.configured || !config.accessToken) { setState('fallback'); return; }
