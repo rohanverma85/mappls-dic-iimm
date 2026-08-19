@@ -91,6 +91,35 @@ const geometryCentre = (geometry:GeoJsonGeometry) => {
   return {lng:lng/points.length,lat:lat/points.length};
 };
 
+const raiseInspectionDefects = (data:StoreData, inspection:Inspection, reporterId:string) => {
+  if (inspection.status !== 'Completed') return [];
+  const project = data.projects.find((candidate) => candidate.id === inspection.projectId && candidate.tenantId === inspection.tenantId);
+  const asset = data.assets.find((candidate) => candidate.id === inspection.assetId && candidate.tenantId === inspection.tenantId);
+  if (!project || !asset) return [];
+  const location = geometryCentre(asset.geometry);
+  const dueHours = data.tenants.find((candidate) => candidate.id === inspection.tenantId)?.slas.Medium ?? 168;
+  const existingItems = new Set(data.defects.filter((defect) => defect.sourceInspectionId === inspection.id).map((defect) => defect.sourceChecklistItem));
+  const created:Defect[] = [];
+  for (const flagged of inspection.checklist.filter((entry) => entry.status === 'Flag' && !existingItems.has(entry.item))) {
+    const defect:Defect = {
+      id:`DEF-${Math.floor(1000+Math.random()*9000)}`, tenantId:inspection.tenantId, projectId:inspection.projectId, assetId:inspection.assetId,
+      source:'Internal', reporterId, title:`Inspection flag · ${flagged.item}`,
+      description:flagged.note?.trim() || `${flagged.item} was flagged during inspection ${inspection.id}.`,
+      location:asset.location, lat:location.lat, lng:location.lng, severity:'Medium', status:'Assigned', checkerValidation:'Not required',
+      makerId:inspection.makerId, checkerId:inspection.checkerId, duplicateOf:null, duplicateCount:0, createdAt:new Date().toISOString(),
+      dueAt:new Date(Date.now()+dueHours*3_600_000).toISOString(), media:[], geofence:geofenceFor(location,project,asset),
+      sourceInspectionId:inspection.id, sourceChecklistItem:flagged.item,
+    };
+    data.defects.unshift(defect);
+    created.push(defect);
+  }
+  inspection.defectIds = Array.from(new Set([
+    ...(inspection.defectIds ?? []),
+    ...data.defects.filter((defect) => defect.sourceInspectionId === inspection.id).map((defect) => defect.id),
+  ]));
+  return created;
+};
+
 const featureSourceId = (feature:{id?:string;geometry:GeoJsonGeometry;properties:Record<string,string|number|boolean|null>}, sourceIdField:string|null) => {
   const candidate = sourceIdField ? feature.properties[sourceIdField] : feature.properties.asset_id ?? feature.properties.id ?? feature.properties.name ?? feature.id;
   return candidate === undefined || candidate === null || String(candidate).trim() === ''
@@ -488,7 +517,7 @@ export function createApp() {
   });
   app.patch('/api/inspections/:id', auth, allow('maker','checker','authority'), async (req, res) => {
     const body = z.object({ status:z.enum(['Accepted','Rejected','Not Ready','In Progress','Paused','Completed']).optional(), checklist:z.array(z.object({ item:z.string(), status:z.enum(['Pending','Pass','Flag']), note:z.string().optional() })).optional(), offlineState:z.enum(['Synced','Queued','Conflict review']).optional() }).parse(req.body);
-    const updated = await store.mutate((data) => {
+    const result = await store.mutate((data) => {
       const item = data.inspections.find((i) => i.id === req.params.id && i.tenantId === req.user!.tenantId);
       if (!item) return null;
       if (req.user!.role === 'maker' && item.makerId !== req.user!.id) return null;
@@ -497,11 +526,16 @@ export function createApp() {
       const nextChecklist = body.checklist ?? item.checklist;
       if (body.status === 'Completed' && nextChecklist.some((entry) => entry.status === 'Pending')) return null;
       Object.assign(item, body);
-      return item;
+      return { inspection:item, createdDefects:raiseInspectionDefects(data,item,req.user!.id) };
     });
-    if (!updated) return res.status(404).json({ error:'Inspection not found' });
-    await log(req.user!, 'UPDATED_INSPECTION', 'Inspection', updated.id, `Inspection moved to ${updated.status}.`);
-    res.json(updated);
+    if (!result) return res.status(404).json({ error:'Inspection not found' });
+    await log(req.user!, 'UPDATED_INSPECTION', 'Inspection', result.inspection.id, `Inspection moved to ${result.inspection.status}.`);
+    for (const defect of result.createdDefects) {
+      await log(req.user!, 'RAISED_DEFECT_FROM_INSPECTION', 'Defect', defect.id, `${defect.sourceChecklistItem} was raised from ${result.inspection.id}.`);
+      await notify(defect.makerId, 'Inspection defect assigned', `${defect.id} · ${defect.title}`, 'assignment');
+      await notify(defect.checkerId, 'Inspection defect created', `${defect.id} · ${defect.title}`, 'assignment');
+    }
+    res.json(result.inspection);
   });
 
   app.get('/api/defects', auth, async (req, res) => res.json(visibleToUser((await store.all()).defects, req.user!)));
@@ -704,6 +738,7 @@ export function createApp() {
     const result = await store.mutate((data) => {
       const applied:string[] = [];
       const conflicts = [];
+      const createdInspectionDefects:Defect[] = [];
       for (const operation of body.operations) {
         const lastServerEvent = data.activities.find((entry) => entry.entityId === operation.entityId);
         const serverUpdatedAt = lastServerEvent?.timestamp ?? '1970-01-01T00:00:00.000Z';
@@ -716,7 +751,13 @@ export function createApp() {
         if (operation.entityType === 'Inspection') {
           const inspection = data.inspections.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
           const parsed = z.object({ status:z.enum(['Accepted','Rejected','Not Ready','In Progress','Paused','Completed']).optional(), checklist:z.array(z.object({item:z.string(),status:z.enum(['Pending','Pass','Flag']),note:z.string().optional()})).optional() }).safeParse(operation.payload);
-          if (inspection && parsed.success) { Object.assign(inspection, parsed.data, { offlineState:'Synced' as const }); applied.push(operation.entityId); }
+          if (inspection && parsed.success) {
+            const nextChecklist = parsed.data.checklist ?? inspection.checklist;
+            if (parsed.data.status === 'Completed' && nextChecklist.some((entry) => entry.status === 'Pending')) continue;
+            Object.assign(inspection, parsed.data, { offlineState:'Synced' as const });
+            createdInspectionDefects.push(...raiseInspectionDefects(data,inspection,req.user!.id));
+            applied.push(operation.entityId);
+          }
         }
         if (operation.entityType === 'Defect') {
           const defect = data.defects.find((item) => item.id === operation.entityId && item.tenantId === req.user!.tenantId && (item.makerId === req.user!.id || item.checkerId === req.user!.id));
@@ -742,11 +783,16 @@ export function createApp() {
           applied.push(operation.entityId);
         }
       }
-      return { applied, conflicts };
+      return { applied, conflicts, createdInspectionDefects };
     });
     for (const entityId of result.applied) await log(req.user!, 'SYNCED_OFFLINE_CHANGE', 'OfflineOperation', entityId, 'Applied after reconnect using server-timestamp conflict rules.');
     for (const conflict of result.conflicts) await log(req.user!, 'QUEUED_SYNC_CONFLICT', conflict.entityType, conflict.entityId, 'Client edit is older than the server state and requires manual review.');
-    res.json(result);
+    for (const defect of result.createdInspectionDefects) {
+      await log(req.user!, 'RAISED_DEFECT_FROM_INSPECTION', 'Defect', defect.id, `${defect.sourceChecklistItem} was raised from ${defect.sourceInspectionId} after offline sync.`);
+      await notify(defect.makerId, 'Inspection defect assigned', `${defect.id} · ${defect.title}`, 'assignment');
+      await notify(defect.checkerId, 'Inspection defect created', `${defect.id} · ${defect.title}`, 'assignment');
+    }
+    res.json({ applied:result.applied, conflicts:result.conflicts });
   });
 
   app.get('/api/search', auth, async (req, res) => {

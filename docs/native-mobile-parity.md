@@ -15,11 +15,11 @@ This matrix records the Android/iOS delivery contract against the shared IIMM AP
 | Official Mappls native basemap | Artifact-gated | Artifact-gated | requires Android `*.a.conf` + `*.a.olf`, and iOS `i.conf` + `i.olf` |
 | Reverse-geocoded address | Native | Native | server Mappls proxy; production five-role contract verifies a non-empty address |
 | Geo-fenced attendance | Native, Maker only | Native, Maker only | device GPS/accuracy, server distance decision, offline queue |
-| Joint/RFI inspections | Native | Native | schedule, accept/reject/not-ready, checklist pass/flag/note, pause/resume/complete |
-| Defects and Action Taken Reports | Native | Native | GPS/media capture, start work, offline defect/ATR queue, Checker verify/rework |
+| Joint/RFI inspections | Native | Native | schedule, accept/reject/not-ready, checklist pass/flag/note, pause/resume/complete; completed flags create duplicate-safe linked defects |
+| Defects and Action Taken Reports | Native | Native | inspection-linked defects, GPS/media capture, start work, offline defect/ATR queue, Checker verify/rework |
 | Citizen reporting and closure | Native | Native | location/media issue, Checker validation, duplicate handling, rating/comment/reopen |
 | Payments | Native | Native | Maker claim, Checker review and Authority authorization with auditable notes |
-| Helpdesk | Native | Native | create, conversation, assignment/status progression, resolve/close/reopen |
+| Helpdesk | Native | Native | create, conversation, assignment/status progression, resolve/close/reopen, and the same self-service FAQ as web |
 | Notifications | Native | Native | individual and mark-all-read actions |
 | Activity log and search | Native | Native | scoped list, full-record search drill-down |
 | CSV reports | Native | Native | projects/assets/defects/payments/attendance exports for authorized roles |
@@ -27,7 +27,7 @@ This matrix records the Android/iOS delivery contract against the shared IIMM AP
 
 ## Verification record
 
-- Web/API: TypeScript checks, interaction audit, 16 server workflow tests and production build pass through `npm run check`.
+- Web/API: TypeScript checks, interaction audit, 17 server workflow tests and production build pass through `npm run check`.
 - Production API: `npm run check:native-api` passes for Tenant Administrator, Authority, Maker, Checker and Citizen at `https://diciimm.mapplsgov.com`.
 - Android: `./gradlew :app:assembleDebug` succeeds; the debug APK installs and cold-launches on the local Android emulator.
 - iOS: the `IIMM` Debug scheme builds for `iphonesimulator`; the app installs and launches on the local iPhone simulator.

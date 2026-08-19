@@ -185,6 +185,34 @@ describe('IIMM API', () => {
       ],
     }).expect(200);
     expect(completed.body.status).toBe('Completed');
+    expect(completed.body.defectIds).toHaveLength(1);
+    const defects = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    const raised = defects.body.find((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1140');
+    expect(raised).toMatchObject({
+      sourceChecklistItem:'Parapets', projectId:'prj-1', assetId:'asset-1', makerId:'usr-maker-1', checkerId:'usr-checker-1', status:'Assigned',
+    });
+    await request(app).patch('/api/inspections/INS-1140').set(auth(maker)).send({status:'Completed'}).expect(200);
+    const afterRepeat = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    expect(afterRepeat.body.filter((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1140')).toHaveLength(1);
+  });
+
+  it('raises linked defects when an offline inspection completion syncs', async () => {
+    const maker = await login('usr-maker-2');
+    const synced = await request(app).post('/api/sync').set(auth(maker)).send({ operations:[{
+      entityType:'Inspection', entityId:'INS-1138', clientUpdatedAt:new Date(Date.now()+60_000).toISOString(), payload:{
+        status:'Completed', checklist:[
+          {item:'Structural cracks',status:'Pass'}, {item:'Electrical wiring',status:'Pass'},
+          {item:'Fire safety equipment',status:'Flag',note:'Two extinguishers expired'}, {item:'Roof waterproofing',status:'Pass'},
+        ],
+      },
+    }] }).expect(200);
+    expect(synced.body.applied).toContain('INS-1138');
+    const defects = await request(app).get('/api/defects').set(auth(maker)).expect(200);
+    const raised = defects.body.filter((item:{sourceInspectionId?:string}) => item.sourceInspectionId === 'INS-1138');
+    expect(raised).toHaveLength(1);
+    expect(raised[0]).toMatchObject({ sourceChecklistItem:'Fire safety equipment', makerId:'usr-maker-2', checkerId:'usr-checker-2' });
+    const inspections = await request(app).get('/api/inspections').set(auth(maker)).expect(200);
+    expect(inspections.body.find((item:{id:string}) => item.id === 'INS-1138').defectIds).toEqual([raised[0].id]);
   });
 
   it('returns scoped full records for native search drill-down', async () => {

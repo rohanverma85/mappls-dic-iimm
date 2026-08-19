@@ -145,6 +145,7 @@ private fun ModuleScreen(vm:AppViewModel,api:ApiClient,spec:ModuleSpec){
     Scaffold(floatingActionButton={if(spec.createKind!=null&&canCreate(vm.session!!.user.role,spec.key))FloatingActionButton(onClick={when(spec.key){"attendance"->attendancePermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION));"defects"->evidenceLocationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION));"gis_imports"->gisPicker.launch(arrayOf("application/vnd.google-earth.kml+xml","application/vnd.google-earth.kmz","application/zip","application/octet-stream","*/*"));else->dialog=true}}){Icon(if(spec.key=="attendance")Icons.Outlined.MyLocation else if(spec.key=="gis_imports")Icons.Outlined.UploadFile else Icons.Outlined.Add,"Create")}}){padding->
         LazyColumn(Modifier.padding(padding).fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
             item{Text(spec.subtitle,color=Color.Gray);Spacer(Modifier.height(4.dp));Text("${vm.records.size} records",style=MaterialTheme.typography.labelLarge,color=Navy)}
+            if(spec.key=="tickets")item{SelfServiceFaq()}
             if(vm.records.isEmpty()&&!vm.busy)item{EmptyState("No records are visible for this role and tenant.")}
             items(vm.records,key={it.optString("id",it.toString().hashCode().toString())}){record->RecordCard(record,spec.key,vm.session!!.user.role,onOpen={detailRecord=record}){path,body->when(path){
                 "local:atr"->{pendingAtr=record;atrLocationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION))}
@@ -169,6 +170,30 @@ private fun ModuleScreen(vm:AppViewModel,api:ApiClient,spec:ModuleSpec){
     feedbackRecord?.let{record->FeedbackDialog(onDismiss={feedbackRecord=null}){body->scope.launch{vm.action{api.post("/api/defects/${record.getString("id")}/feedback",body);vm.module(api,spec);feedbackRecord=null}}}}
     reviewRecord?.let{record->DecisionDialog(if(reviewKind=="local:atr-review")"Review Action Taken Report" else "Review payment claim",onDismiss={reviewRecord=null}){approve,note->scope.launch{vm.action{val path=if(reviewKind=="local:atr-review")"/api/defects/${record.getString("id")}/verify-atr" else "/api/payments/${record.getString("id")}/action";api.post(path,JSONObject().put("decision",if(reviewKind=="local:atr-review"){if(approve)"verify" else "rework"}else{if(approve)"approve" else "reject"}).put("note",note));vm.module(api,spec);reviewRecord=null}}}}
     parsedGis?.let{parsed->GisImportDialog(parsed,gisFileName,api,onDismiss={parsedGis=null}){body->scope.launch{vm.action{api.post("/api/gis/imports",body);vm.module(api,spec);parsedGis=null}}}}
+}
+
+private val helpdeskFaq = listOf(
+    "How does offline sync work?" to "Field actions are stored locally when connectivity is poor. On reconnect, the server timestamp wins; conflicting local edits remain in a manual-review queue instead of being silently dropped.",
+    "Why was my report linked as a duplicate?" to "Nearby open reports on the same asset are linked to one official defect. Your report still counts, raises visibility and may escalate severity.",
+    "Who verifies my Action Taken Report?" to "The assigned Checker reviews your evidence and work outcome. A defect becomes resolved only after that independent verification.",
+)
+
+@Composable
+private fun SelfServiceFaq(){
+    var expanded by remember{mutableIntStateOf(0)}
+    ElevatedCard(Modifier.fillMaxWidth()){
+        Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+            Text("Self-serve help",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold,color=Navy)
+            helpdeskFaq.forEachIndexed{index,(question,answer)->
+                TextButton(onClick={expanded=index},modifier=Modifier.fillMaxWidth()){
+                    Column(Modifier.fillMaxWidth()){
+                        Text(question,fontWeight=FontWeight.SemiBold)
+                        if(expanded==index)Text(answer,style=MaterialTheme.typography.bodySmall,color=Color.Gray,modifier=Modifier.padding(top=4.dp))
+                    }
+                }
+            }
+        }
+    }
 }
 
 private suspend fun applyRecordAction(record:JSONObject,spec:ModuleSpec,path:String,body:JSONObject,vm:AppViewModel,api:ApiClient,queue:OfflineQueue){
@@ -220,6 +245,7 @@ private fun InspectionDialog(record:JSONObject,role:Role,onDismiss:()->Unit,onAc
         title={Text("${record.optString("id")} · Inspection")},
         text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
             Text("$status · ${record.optString("type")}",color=Navy,fontWeight=FontWeight.Bold)
+            record.optJSONArray("defectIds")?.let{array->if(array.length()>0)Text("Raised in Defect Management: ${(0 until array.length()).joinToString(", "){array.optString(it)}}",color=Color(0xFF9A5A00),style=MaterialTheme.typography.bodySmall)}
             if(checklist.isEmpty())Text("No checklist items were configured for this inspection.",color=Color.Gray)
             LazyColumn(Modifier.heightIn(max=330.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 itemsIndexed(checklist){index,entry->ElevatedCard(Modifier.fillMaxWidth()){Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){Text(entry.item,fontWeight=FontWeight.SemiBold);if(editable&&status in setOf("In Progress","Paused")){Row(horizontalArrangement=Arrangement.spacedBy(7.dp)){listOf("Pending","Pass","Flag").forEach{value->FilterChip(selected=entry.status==value,onClick={checklist[index]=entry.copy(status=value,note=if(value=="Flag"&&entry.note.isBlank())"Flagged during native field inspection" else if(value=="Pass")"" else entry.note)},label={Text(value)})}};if(entry.status=="Flag")OutlinedTextField(entry.note,{checklist[index]=entry.copy(note=it)},label={Text("Flag note")},modifier=Modifier.fillMaxWidth())}else Text(entry.status,style=MaterialTheme.typography.labelMedium,color=Color.Gray)}}}

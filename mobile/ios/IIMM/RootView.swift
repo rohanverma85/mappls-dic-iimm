@@ -164,6 +164,19 @@ struct ModuleView: View {
         Text(module.subtitle).foregroundStyle(.secondary)
         Text("\(app.records.count) records").font(.caption.bold()).foregroundStyle(Color.iimmNavy)
       }
+      if module.id == "tickets" {
+        Section("Self-serve help") {
+          DisclosureGroup("How does offline sync work?") {
+            Text("Field actions are stored locally when connectivity is poor. On reconnect, the server timestamp wins; conflicting local edits remain in a manual-review queue instead of being silently dropped.")
+          }
+          DisclosureGroup("Why was my report linked as a duplicate?") {
+            Text("Nearby open reports on the same asset are linked to one official defect. Your report still counts, raises visibility and may escalate severity.")
+          }
+          DisclosureGroup("Who verifies my Action Taken Report?") {
+            Text("The assigned Checker reviews your evidence and work outcome. A defect becomes resolved only after that independent verification.")
+          }
+        }
+      }
       if app.records.isEmpty && !app.busy {
         ContentUnavailableView(
           "No records", systemImage: "tray",
@@ -599,6 +612,9 @@ struct InspectionDetailView: View {
           LabeledContent("ID", value: id)
           LabeledContent("Type", value: record["type"] as? String ?? "")
           LabeledContent("Status", value: status)
+          if let defectIds = record["defectIds"] as? [String], !defectIds.isEmpty {
+            LabeledContent("Raised defects", value: defectIds.joined(separator: ", "))
+          }
         }
         Section("Asset checklist") {
           if checklist.isEmpty { Text("No checklist items were configured.").foregroundStyle(.secondary) }
