@@ -77,11 +77,11 @@ export default function MapplsMap({layers=[],assets=[],defects=[],projects=[],fo
       if(disposed)return;
       const map = new sdk.Map(id.current,{center:[center.lat,center.lng],zoom:compact?16:14,zoomControl:true,location:true});
       mapRef.current=map;
+      setState('live');
       const draw=()=>{
         layers.filter((layer)=>layer.visible&&layer.status==='Published').forEach((layer)=>{ if(sdk.addGeoJson)new sdk.addGeoJson({map,data:styledCollection(layer),fitbounds:!compact,cType:0}); });
         defects.forEach((defect)=>{ if(sdk.Marker)new sdk.Marker({map,position:{lat:defect.lat,lng:defect.lng},fitbounds:false,popupHtml:`<strong>${defect.id}</strong><br/>${defect.title}<br/>${defect.status}`}); });
         projects.forEach((project)=>{ if(sdk.Circle)new sdk.Circle({map,center:{lat:project.center.lat,lng:project.center.lng},radius:project.geofenceRadiusMeters,strokeColor:'#104685',strokeOpacity:0.7,fillColor:'#104685',fillOpacity:0.08}); });
-        setState('live');
       };
       if(map.on)map.on('load',draw);else draw();
     }).catch(()=>setState('error'));
